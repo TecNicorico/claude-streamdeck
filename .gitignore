@@ -17,3 +17,4 @@ hook-token
 # Machine-local Claude Code approvals. Only a global ~/.gitignore_global was covering
 # this, which does not travel with a clone or reach CI.
 .claude/settings.local.json
+.prova-hook.log
