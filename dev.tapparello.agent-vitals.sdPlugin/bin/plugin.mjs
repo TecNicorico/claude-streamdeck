@@ -4106,7 +4106,7 @@ function pidLooksRecycled(session, procStartMs, slackMs = PID_START_SLACK_MS) {
   return procStartMs > startedAt + slackMs;
 }
 function sessionSig(sessions, now = Date.now(), activity = null, pending = null) {
-  return JSON.stringify((sessions ?? []).map((s) => [s.pid, s.status ?? "", s.waitingFor ?? "", sessionState(s, now, actOf(s, activity), pendKind(s, pending))]));
+  return JSON.stringify((sessions ?? []).map((s) => [s.pid ?? s.sessionId, s.status ?? "", s.waitingFor ?? "", sessionState(s, now, actOf(s, activity), pendKind(s, pending)), titoloSessione(s)]));
 }
 var URGENCY = { "needs-approval": 0, "input-needed": 1, working: 2, finished: 3, idle: 4, unknown: 5 };
 var actOf = (s, activity) => activity && s?.sessionId ? activity.get(s.sessionId) ?? null : null;

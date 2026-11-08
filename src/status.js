@@ -133,7 +133,9 @@ export function pidLooksRecycled(session, procStartMs, slackMs = PID_START_SLACK
 // tick — recomputing both sides with the same `now` makes time-only transitions
 // (finished → idle at 60s) cancel out and never repaint.
 export function sessionSig(sessions, now = Date.now(), activity = null, pending = null) {
-  return JSON.stringify((sessions ?? []).map((s) => [s.pid, s.status ?? "", s.waitingFor ?? "", sessionState(s, now, actOf(s, activity), pendKind(s, pending))]));
+  // Il titolo è nella firma: arriva anche da solo (il primo messaggio di una sessione
+  // cloud), e senza ridisegnare il tasto resterebbe invisibile fino al giro dei 30 s.
+  return JSON.stringify((sessions ?? []).map((s) => [s.pid ?? s.sessionId, s.status ?? "", s.waitingFor ?? "", sessionState(s, now, actOf(s, activity), pendKind(s, pending)), titoloSessione(s)]));
 }
 
 // Lower rank = more urgent = shown first on an auto-bound key.

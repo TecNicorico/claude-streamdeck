@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { sessioniCloud, richiesteNuove, richiesteSparite, voceDa, decisioneDa, intervallo, urlValido } from "../src/relay.js";
 import { decisionBody, answerBody } from "../src/approve.js";
-import { sessionState, resolveStatusKey, sessionWhere, titoloSessione } from "../src/status.js";
+import { sessionState, resolveStatusKey, sessionWhere, titoloSessione, sessionSig } from "../src/status.js";
 
 const SNAP = {
   versione: 3, ora: 1_000_000,
@@ -78,4 +78,9 @@ test("una sessione locale mostra il suo nome solo se non è quello derivato dall
   assert.equal(titoloSessione({ name: "Deploy di venerdì", nameSource: "user" }), "Deploy di venerdì");
   assert.equal(titoloSessione({ name: "senza fonte" }), "", "senza nameSource non si sa: meglio niente");
   assert.equal(titoloSessione({ titolo: "dal relay", name: "x", nameSource: "user" }), "dal relay");
+});
+
+test("un titolo che arriva da solo fa ridisegnare i tasti", () => {
+  const [s] = sessioniCloud(SNAP, 1_000_000);
+  assert.notEqual(sessionSig([s], 1_000_000), sessionSig([{ ...s, titolo: "Sistema la mappa" }], 1_000_000));
 });
