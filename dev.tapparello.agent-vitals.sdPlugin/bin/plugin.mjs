@@ -4216,13 +4216,6 @@ function premi(req, stato, slot) {
   }
   return { stato: { ...stato, risposte }, risposte };
 }
-function intestazione(req, stato = statoIniziale()) {
-  const qs = req?.toolInput?.questions ?? [];
-  const q = qs[stato.passo];
-  if (!q) return "";
-  const h = String(q.header || "domanda").toUpperCase();
-  return qs.length > 1 ? `${h} ${stato.passo + 1}/${qs.length}` : h;
-}
 var testoDomanda = (req, stato = statoIniziale()) => String(req?.toolInput?.questions?.[stato.passo]?.question ?? "");
 
 // src/approve.js
@@ -4688,7 +4681,19 @@ var GLYPHS = {
   clock: ["M12 12 m-8.5 0 a8.5 8.5 0 1 0 17 0 a8.5 8.5 0 1 0 -17 0", "M12 6.5 V12 l4 2.5"],
   calendar: ["M4 6.5 h16 v14 H4 z", "M4 11 h16", "M8 3 v4", "M16 3 v4"],
   week: ["M4 6.5 h16 v14 H4 z", "M4 11 h16", "M8 3 v4", "M16 3 v4", "M7.5 15 h3", "M13.5 15 h3"],
-  grid: ["M4 4.5 h6 v6 H4 z", "M14 4.5 h6 v6 h-6 z", "M4 13.5 h6 v6 H4 z", "M14 13.5 h6 v6 h-6 z"]
+  grid: ["M4 4.5 h6 v6 H4 z", "M14 4.5 h6 v6 h-6 z", "M4 13.5 h6 v6 H4 z", "M14 13.5 h6 v6 h-6 z"],
+  // Riga in basso e sessioni (fork TecNicorico): un'icona per ciò che il tasto fa o dice.
+  database: ["M5 6 a7 2.6 0 1 0 14 0 a7 2.6 0 1 0 -14 0", "M5 6 v12 a7 2.6 0 0 0 14 0 V6", "M5 12 a7 2.6 0 0 0 14 0"],
+  question: ["M12 12 m-9.5 0 a9.5 9.5 0 1 0 19 0 a9.5 9.5 0 1 0 -19 0", "M9.3 9.4 a2.8 2.8 0 1 1 4 2.5 c-0.85 0.42 -1.3 1 -1.3 2.1", "M12 17.3 v0.2"],
+  alert: ["M12 3.5 L21.5 20 H2.5 Z", "M12 9.5 v5", "M12 17.3 v0.2"],
+  spark: ["M12 3 v4", "M12 17 v4", "M3 12 h4", "M17 12 h4", "M5.6 5.6 l2.8 2.8", "M15.6 15.6 l2.8 2.8", "M5.6 18.4 l2.8 -2.8", "M15.6 8.4 l2.8 -2.8"],
+  moon: ["M19.5 14.6 A8 8 0 1 1 9.4 4.5 a6.3 6.3 0 0 0 10.1 10.1 z"],
+  cloud: ["M7.2 18.5 h10 a4 4 0 0 0 0.4 -7.98 a5.6 5.6 0 0 0 -10.9 1.5 a3.3 3.3 0 0 0 0.5 6.48 z"],
+  file: ["M6.5 3 h7.5 l4 4 v14 h-11.5 z", "M14 3 v4 h4"],
+  plug: ["M9 3 v4.5", "M15 3 v4.5", "M6.5 7.5 h11 v3 a5.5 5.5 0 0 1 -11 0 z", "M12 16 v5"],
+  arrowR: ["M4.5 12 h15", "M13.5 6 l6 6 -6 6"],
+  arrowL: ["M19.5 12 h-15", "M10.5 6 l-6 6 6 6"],
+  hold: ["M12 12 m-9.5 0 a9.5 9.5 0 1 0 19 0 a9.5 9.5 0 1 0 -19 0", "M7.5 12.5 l3 3 6 -7"]
 };
 function glyph(name, x, y, size, col, sw = 2.6) {
   const s = size / 24;
@@ -4765,12 +4770,16 @@ var STATUS_LOOK = {
   // couldn't stat. Saying "no status" beats inventing "Idle".
   unknown: { label: "no status", col: C.dim }
 };
+var STATUS_ICON = { "needs-approval": "alert", "input-needed": "question", working: "spark", finished: "allow", idle: "moon" };
 function statusKey(name, st, count, detail = "", tag = "", phase = null) {
   const look = STATUS_LOOK[st] ?? STATUS_LOOK.none;
   const shown = String(name || "CLAUDE").slice(0, 11);
+  const icona = STATUS_ICON[st] ? glyph(STATUS_ICON[st], 10, 8, 22, look.col, 2.4) : "";
+  const angolo = count > 1 ? badge(count, look.col) : tag === "cloud" ? glyph("cloud", 110, 7, 24, C.info, 2.2) : corner(tag);
   return svgWrap(`
     ${tintFrame(look.col, !!look.strong, phase)}
-    ${count > 1 ? badge(count, look.col) : corner(tag)}
+    ${icona}
+    ${angolo}
     ${line(72, 78, 128, 25, 700, st === "none" ? C.dim : C.text, shown)}
     ${line(72, 104, 130, 17, 700, look.col, look.label)}
     ${detail ? line(72, 127, 132, 13, 400, C.dim, detail) : ""}`);
@@ -4821,144 +4830,141 @@ var APPROVE_LOOK = {
   "approve-always": { word: "ALWAYS", col: C.info, glyphName: "always", weight: "double" },
   "approve-deny": { word: "DENY", col: C.bad, glyphName: "deny", weight: "fill" }
 };
-var RULE_W = 132;
-var RULE_IDEAL = 19;
-var RULE_GOOD = 13;
-function ruleLines(rule) {
-  const good = (s) => fit(s, RULE_W, RULE_IDEAL) >= RULE_GOOD;
-  if (good(rule)) return [rule];
-  const at = rule.indexOf("(");
-  let parts = at >= 0 ? [rule.slice(0, at), rule.slice(at)] : [rule];
-  if (!parts.every(good)) {
-    const tail = parts[parts.length - 1];
-    const colon = tail.indexOf(":");
-    if (colon >= 0) {
-      parts = [
-        ...parts.slice(0, -1),
-        tail.slice(0, colon + 1).replace(/^\(/, ""),
-        tail.slice(colon + 1).replace(/\)$/, "")
-      ];
-    }
-  }
-  const out = [];
-  for (const p of parts.filter(Boolean)) {
-    if (good(p)) {
-      out.push(p);
-      continue;
-    }
-    const max = capacity(RULE_W, RULE_GOOD);
-    for (let i = 0; i < p.length; i += max) out.push(p.slice(i, i + max));
-  }
-  return out;
-}
-function approveKey(kind, req, o = {}) {
-  const look = APPROVE_LOOK[kind];
-  const shell = (col2, mult2, bodyLines, sub, cornerSvg2 = "", wordOverride = null) => {
-    const onBand = kind === "approve-deny" && mult2 === 1 ? C.bg : col2;
-    const n = Math.min(4, bodyLines.length);
-    const [top, step] = [[92, 0], [78, 26], [68, 22], [62, 18]][n - 1] ?? [92, 0];
-    const body = bodyLines.slice(0, n).map((l, i) => line(72, top + i * step, RULE_W, l.max ?? 22, 700, l.col ?? C.text, l.t)).join("");
-    return svgWrap(`
-      ${tintFrame(col2, mult2 === 1, o.phase ?? null)}
-      ${band[look.weight](col2, mult2)}
-      ${actionHead(look.glyphName, wordOverride ?? look.word, onBand)}
-      ${cornerSvg2}
-      ${body}
-      ${foot(sub)}`);
-  };
-  if (o.err) return shell(C.bad, 1, [], o.err);
-  if (!req) return shell(C.dim, 0.4, [], "all clear");
-  const d = describeRequest(req);
-  const name = req.cloud ? `${d.name} \xB7 cloud` : d.name;
-  const target = o.target || d.target;
-  const rule = kind === "approve-always" ? alwaysRule(req, !!o.sessionOnly) : null;
-  const denied = kind === "approve-always" && rule !== null && !!o.denied;
-  const disabled = kind === "approve-always" && (rule === null || denied);
-  const col = disabled ? C.dim : look.col;
-  const mult = disabled ? 0.4 : 1;
-  const cornerSvg = o.depth > 1 ? badge(o.depth, col) : corner(o.label);
-  const word = kind === "approve-always" ? denied ? "ALWAYS" : rule === null ? "ALWAYS n/a" : `ALWAYS \xB7${o.sessionOnly ? "ses" : "prj"}` : look.word;
-  if (kind === "approve-allow" && o.lungo) {
-    return shell(C.warn, 1, [{ t: target, max: 22 }, { t: o.dettaglio || "tieni premuto", col: C.warn, max: 16 }], "tieni premuto 2 s", cornerSvg, "ALLOW 2s");
-  }
-  if (denied) {
-    return shell(col, mult, ruleLines(rule).map((t) => ({ t, col: C.dim, max: 18 })), String(o.denied), cornerSvg, word);
-  }
-  const shown = kind === "approve-always" ? rule ?? target : target;
-  const lines = kind === "approve-always" && rule != null ? ruleLines(rule).map((t) => ({ t, max: 19 })) : [{ t: shown, max: 24 }];
-  return shell(col, mult, lines, name, cornerSvg, word);
-}
 function aCapo(testo, max, righe) {
-  const parole = String(testo ?? "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  const pezzi = [];
+  for (const p of String(testo ?? "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean)) {
+    let resto = p;
+    while (resto.length > max) {
+      let k = max;
+      for (let i2 = max - 1; i2 >= 1; i2--) if (/[:/\\\-._=,]/.test(resto[i2])) {
+        k = i2 + 1;
+        break;
+      }
+      pezzi.push(resto.slice(0, k));
+      resto = resto.slice(k);
+    }
+    if (resto) pezzi.push(resto);
+  }
   const out = [];
-  let cur = "";
-  for (let i = 0; i < parole.length; i++) {
-    const p = parole[i];
-    const prova = cur ? cur + " " + p : p;
+  let cur = "", i = 0;
+  for (; i < pezzi.length; i++) {
+    const prova = cur ? cur + " " + pezzi[i] : pezzi[i];
     if (prova.length <= max) {
       cur = prova;
       continue;
     }
-    if (cur) out.push(cur);
-    cur = p.length > max ? p.slice(0, max - 1) + "\u2026" : p;
+    out.push(cur);
+    cur = pezzi[i];
     if (out.length === righe) {
       cur = "";
       break;
     }
   }
-  if (cur && out.length < righe) out.push(cur);
-  const usato = out.join(" ").replace(/…/g, "").length;
-  const totale = parole.join(" ").length;
-  if (out.length && usato < totale && !out[out.length - 1].endsWith("\u2026")) {
+  if (cur && out.length < righe) {
+    out.push(cur);
+    i = pezzi.length;
+  }
+  if (i < pezzi.length && out.length) {
     const u = out[out.length - 1];
     out[out.length - 1] = (u.length >= max ? u.slice(0, max - 1) : u) + "\u2026";
   }
   return out.length ? out : ["\u2014"];
 }
-var CORPO = [[92, 0], [78, 26], [68, 22], [62, 18]];
-var corpo = (righe, ideale, col = C.text) => {
-  const n = Math.min(4, righe.length);
-  const [top, step] = CORPO[n - 1] ?? CORPO[0];
-  const size = n === 1 ? ideale : n === 2 ? Math.min(ideale, 20) : n === 3 ? Math.min(ideale, 18) : 15;
-  return righe.slice(0, n).map((t, i) => line(72, top + i * step, 130, size, 700, col, t)).join("");
-};
-function opzioneKey(numero, intestazione2, label, sub, phase = null) {
-  const col = C.ask;
+function grandeKey(o = {}) {
+  const colIcona = o.colIcona ?? C.text;
+  const icona = o.numero != null ? `<circle cx="72" cy="34" r="21" fill="${colIcona}"/>${txt(72, 43, 26, 800, C.bg, String(o.numero))}` : o.icona ? glyph(o.icona, 50, 12, 44, colIcona, 3.2) : "";
+  const righe = (o.testo ?? []).filter((t) => t != null && t !== "");
+  let corpoSvg = "";
+  const LARGO = 120;
+  if (o.testo2) {
+    corpoSvg = (righe[0] != null ? line(72, 82, LARGO, o.ideale ?? 20, 700, o.col ?? C.text, righe[0]) : "") + line(72, 104, LARGO, 15, 700, o.col2 ?? C.dim, o.testo2);
+  } else if (righe.length) {
+    const n = Math.min(3, righe.length);
+    const [ys, size] = [[[88], o.ideale ?? 20], [[80, 101], Math.min(o.ideale ?? 20, 18)], [[72, 90, 108], 15]][n - 1];
+    corpoSvg = righe.slice(0, n).map((t, i) => line(72, ys[i], LARGO, size, 700, o.col ?? C.text, t)).join("");
+  }
+  const altre = (o.angolo?.badge ?? 0) - 1;
+  const angolo = altre > 0 ? `<circle cx="119" cy="20" r="13" fill="${C.panel}" stroke="${colIcona}" stroke-width="1.5"/>` + txt(119, 25, 13, 800, C.text, `+${altre}`) : o.angolo?.testo ? txt(132, 26, 15, 800, colIcona, o.angolo.testo, "end") : "";
   return svgWrap(`
-    ${tintFrame(col, true, phase)}
-    ${band.rule(col)}
-    <circle cx="21" cy="19" r="11.5" fill="${C.panel}" stroke="${col}" stroke-width="1.5"/>
-    ${txt(21, 24.5, 14, 700, C.text, numero)}
-    ${line(40, 25, 94, 16, 800, col, String(intestazione2 || "domanda").toUpperCase(), "start", ' letter-spacing="0.5"')}
-    ${corpo(aCapo(label, 12, 3), 22)}
-    ${foot(sub)}`);
+    ${tintFrame(o.tinta ?? null, !!o.forte, o.phase ?? null)}
+    ${o.cloud ? glyph("cloud", 9, 7, 24, C.info, 2.2) : ""}
+    ${angolo}
+    ${icona}
+    ${corpoSvg}
+    ${foot(o.piede ?? "", o.colPiede ?? C.dim)}`);
 }
-function paginaKey(testo, sub) {
-  const col = C.ask;
-  return svgWrap(`
-    ${tintFrame(col, false)}
-    ${band.rule(col, 0.5)}
-    ${actionHead("list", "opzioni", C.dim)}
-    ${line(72, 88, 128, 24, 700, C.text, testo)}
-    ${foot(sub)}`);
+var SPENTO = "#4a4658";
+function decisioneKey(kind, req, o = {}) {
+  const allow = kind === "approve-allow";
+  if (o.err) return grandeKey({ icona: "alert", colIcona: C.bad, tinta: C.bad, piede: o.err });
+  if (!req) return grandeKey({ icona: allow ? "allow" : "deny", colIcona: SPENTO, piede: "all clear" });
+  const d = describeRequest(req);
+  const testo = o.target ? [o.target] : aCapo(targetIntero(req), 14, 3);
+  const comune = { cloud: !!req.cloud, piede: o.label || d.name, phase: o.phase ?? null, angolo: { badge: o.depth } };
+  if (allow && o.lungo) {
+    return grandeKey({
+      ...comune,
+      icona: "hold",
+      colIcona: C.warn,
+      tinta: C.warn,
+      forte: true,
+      testo: testo.slice(0, 1),
+      testo2: "tieni premuto 2 s",
+      col2: C.warn,
+      angolo: o.depth > 1 ? { badge: o.depth } : { testo: "2 s" }
+    });
+  }
+  const col = allow ? C.ok : C.bad;
+  return grandeKey({ ...comune, icona: allow ? "allow" : "deny", colIcona: col, tinta: col, forte: true, testo });
 }
-function domandaKey(intestazione2, testo, sub) {
-  return svgWrap(`
-    ${tintFrame(C.ask, false)}
-    ${band.cap(C.ident.focus)}
-    ${actionHead("focus", intestazione2 || "domanda", C.ident.focus)}
-    ${corpo(aCapo(testo, 15, 4), 16, C.text)}
-    ${foot(sub)}`);
+function targetIntero(req) {
+  const t = String(req?.toolName ?? "");
+  const i = req?.toolInput ?? {};
+  if (t === "Bash" && i.command) return String(i.command).replace(/\s+/g, " ").trim();
+  return describeRequest(req).target;
+}
+function opzioneKey(numero, intestazione, label, sub, phase = null, cloud = false) {
+  return grandeKey({
+    numero,
+    colIcona: C.ask,
+    tinta: C.ask,
+    forte: true,
+    phase,
+    cloud,
+    testo: aCapo(label, 12, 3),
+    piede: String(intestazione || "domanda").toUpperCase() + (sub ? ` ${sub}` : "")
+  });
+}
+function paginaKey(testo, sub, avanti = true, cloud = false) {
+  return grandeKey({ icona: avanti ? "arrowR" : "arrowL", colIcona: C.ask, tinta: C.ask, cloud, testo: [testo], piede: sub });
+}
+function domandaKey(intestazione, testo, sub, cloud = false) {
+  return grandeKey({
+    icona: "question",
+    colIcona: C.ask,
+    tinta: C.ask,
+    cloud,
+    testo: aCapo(testo, 15, 3),
+    ideale: 16,
+    piede: String(intestazione || "domanda").toUpperCase() + (sub ? ` ${sub}` : "")
+  });
 }
 var INFO_TINTA = { prod: C.bad, staging: C.warn, legge: C.info };
-function infoKey(intestazione2, righe, sub, tinta = null) {
+function infoKey(icona, righe, sub, tinta = null, opz = {}) {
   const col = tinta ? INFO_TINTA[tinta] ?? null : null;
-  return svgWrap(`
-    ${tintFrame(col, tinta === "prod")}
-    ${band.cap(C.ident.focus)}
-    ${actionHead("focus", intestazione2, C.ident.focus)}
-    ${corpo(righe, 21)}
-    ${foot(sub)}`);
+  if (opz.testo2) {
+    return grandeKey({ icona, colIcona: col ?? C.ident.focus, tinta: col, forte: tinta === "prod", cloud: opz.cloud, testo: righe.slice(0, 1), testo2: opz.testo2, col2: col ?? C.dim, piede: sub });
+  }
+  return grandeKey({ icona, colIcona: col ?? opz.colIcona ?? C.ident.focus, tinta: col, cloud: opz.cloud, testo: righe, ideale: opz.ideale, piede: sub });
+}
+function iconaStrumento(toolName) {
+  const t = String(toolName ?? "");
+  if (t === "Bash") return ["code", C.ident.code];
+  if (t === "WebFetch" || t === "WebSearch") return ["web", C.ident.web];
+  if (["Edit", "Write", "Read", "NotebookEdit", "MultiEdit"].includes(t)) return ["file", C.ident.project];
+  if (t === "Task" || t === "Agent") return ["layers", C.ident.chat];
+  if (t.startsWith("mcp__")) return ["plug", C.ident.custom];
+  return ["custom", C.ident.custom];
 }
 
 // src/supabase.js
@@ -5287,41 +5293,35 @@ function rigaInBasso(kind, env) {
   const err = req?.cloud ? null : state2.hookErr ?? (!state2.approveQueue.length && authFlagged2 ? "auth?" : null);
   const depth = approvableDepth(state2.approveQueue);
   const nome = req ? describeRequest(req).name : "";
-  const dove = req?.cloud ? "cloud" : "";
-  const sub = [nome, dove].filter(Boolean).join(" \xB7 ");
+  const cloud = !!req?.cloud;
   if (!err && req && isQuestion(req)) {
     const st = state2.risposte?.get(req.id) ?? statoIniziale();
     const f = facce(req, st)[SLOT[kind]];
-    const head = intestazione(req, st);
+    const qs = req.toolInput?.questions ?? [];
+    const passo = qs.length > 1 ? `${st.passo + 1}/${qs.length}` : "";
+    const head = String(qs[st.passo]?.header || "domanda");
     const painted = { reqId: req.id, rule: null, faccia: f ? `${st.passo}:${st.pagina}:${f.tipo}:${f.indice ?? f.verso ?? ""}` : null, lungo: false };
-    if (!f) return { image: infoKey("domanda", ["\u2014"], sub), painted };
-    if (f.tipo === "opzione") return { image: opzioneKey(f.indice + 1, head, f.label, sub, phase), painted };
-    if (f.tipo === "pagina") return { image: paginaKey(f.testo, f.verso ? "3-4 di 4" : "1-2 di 4"), painted };
-    return { image: domandaKey(head, testoDomanda(req, st), sub), painted };
+    if (!f) return { image: infoKey("question", ["\u2014"], nome, null, { cloud }), painted };
+    if (f.tipo === "opzione") return { image: opzioneKey(f.indice + 1, head, f.label, passo, phase, cloud), painted };
+    if (f.tipo === "pagina") return { image: paginaKey("altre 2", f.verso ? "opzioni 3-4" : "opzioni 1-2", !!f.verso, cloud), painted };
+    return { image: domandaKey(head, testoDomanda(req, st), passo, cloud), painted };
   }
   const c = req ? classifica(req, confDa(state2.globalSettings)) : null;
   if (kind === "approve-always") {
     const painted = { reqId: req?.id ?? null, rule: null, faccia: null, lungo: false };
-    if (err) return { image: infoKey("comando", ["\u2014"], err, "prod"), painted };
-    if (!req) return { image: infoKey("comando", ["\u2014"], "all clear"), painted };
+    if (err) return { image: infoKey("alert", ["\u2014"], err, "prod"), painted };
+    if (!req) return { image: infoKey("dot", [], "all clear", null, { colIcona: "#4a4658" }), painted };
     if (c) {
       const tinta = !c.scrive ? "legge" : c.progetto === "STAGING" ? "staging" : "prod";
-      return { image: infoKey("supabase", [c.strumento, etichetta(c)], sub, tinta), painted };
+      return { image: infoKey("database", [c.strumento], nome, tinta, { cloud, testo2: etichetta(c) }), painted };
     }
-    const tool = String(req.toolName ?? "").replace(/^mcp__[^_]+(?:_[^_]+)*__/, "");
-    return { image: infoKey(tool || "comando", aCapo(describeRequest({ ...req, cwd: "" }).target, 13, 3), sub), painted };
+    const [icona, colIcona] = iconaStrumento(req.toolName);
+    const bersaglioPieno = req.toolName === "Bash" ? String(req.toolInput?.command ?? "") : describeRequest({ ...req, cwd: "" }).target;
+    return { image: infoKey(icona, aCapo(bersaglioPieno, 15, 3), nome, null, { cloud, colIcona, ideale: 18 }), painted };
   }
   const lungo = kind === "approve-allow" && !!c?.lungo;
   return {
-    image: approveKey(kind, req, {
-      label: settings.label,
-      err,
-      depth,
-      phase,
-      lungo,
-      dettaglio: c ? etichetta(c) : "",
-      target: c ? bersaglio(req, c) : ""
-    }),
+    image: decisioneKey(kind, req, { err, depth, phase, lungo, target: c ? bersaglio(req, c) : "", label: settings.label }),
     painted: { reqId: req?.id ?? null, rule: null, faccia: null, lungo }
   };
 }

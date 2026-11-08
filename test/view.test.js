@@ -408,11 +408,11 @@ test("a real prompt queued behind a question is still painted and answerable", (
   const state = { ...emptyState(), approveQueue: [question(), req()] };
   assert.match(drawn("approve-allow", { state }), /npm test/);
   assert.equal(viewFor("approve-allow", { state, now: NOW }).painted.reqId, 7);
-  // and the depth badge counts only what a key can reach: two entries, depth 1, no badge
-  // (the badge is a distinctive corner circle — see keyart badge())
-  assert.doesNotMatch(drawn("approve-allow", { state }), /circle cx="121"/);
+  // and the badge counts only what a key can reach: two entries, depth 1, no badge.
+  // Il badge dice quante ALTRE richieste aspettano: «+1», non «2».
+  assert.doesNotMatch(drawn("approve-allow", { state }), />\+\d</);
   const twoReal = { ...emptyState(), approveQueue: [req(), req({ id: 8 })] };
-  assert.match(drawn("approve-allow", { state: twoReal }), /circle cx="121"/);
+  assert.match(drawn("approve-allow", { state: twoReal }), />\+1</);
 });
 
 test("a question keeps 'auth?' away: the URL demonstrably works", () => {
@@ -461,13 +461,14 @@ test("una scrittura in produzione: ALLOW chiede la pressione lunga e lo registra
   const state = { ...emptyState(), globalSettings: CONF_GS, approveQueue: [sqlReq("delete from t")] };
   const allow = viewFor("approve-allow", { state, now: NOW });
   assert.equal(allow.painted.lungo, true);
-  assert.match(text(allow.image), /ALLOW 2S/);
+  assert.match(text(allow.image), /tieni premuto 2 s/);
+  assert.match(text(allow.image), />2 s</, "il «2 s» in alto, al posto del numerino");
   assert.match(text(allow.image), /SQL DELETE/);
-  assert.match(text(allow.image), /PROD · scrive/);
   assert.equal(viewFor("approve-deny", { state, now: NOW }).painted.lungo, false, "DENY non chiede mai di aspettare");
+  assert.doesNotMatch(drawn("approve-deny", { state }), /tieni premuto/);
   const info = drawn("approve-always", { state });
-  assert.match(info, /SUPABASE/);
   assert.match(info, /execute_sql/);
+  assert.match(info, /PROD · scrive/);
 });
 
 test("una lettura in produzione, o una scrittura su staging: un tocco", () => {
@@ -498,13 +499,14 @@ test("con 4 opzioni il centro fa vedere le altre, e la faccia disegnata lo ricor
   const state = { ...emptyState(), approveQueue: [r], risposte: new Map([[r.id, { passo: 0, pagina: 1, risposte: {} }]]) };
   assert.match(drawn("approve-deny", { state }), /Forse/);
   assert.match(drawn("approve-allow", { state }), /Dopo/);
-  assert.match(drawn("approve-always", { state }), /◂ altre/);
+  assert.match(drawn("approve-always", { state }), /opzioni 1-2/);
   assert.equal(viewFor("approve-always", { state, now: NOW }).painted.faccia, "0:1:pagina:0");
 });
 
 test("una richiesta del cloud si riconosce, e un guasto dell'hook locale non la copre", () => {
   const state = { ...emptyState(), hookErr: "port busy", approveQueue: [req({ cloud: true })] };
   const t = drawn("approve-allow", { state });
-  assert.match(t, /cloud/);
+  assert.match(t, /M7\.2 18\.5 h10/, "la nuvola in alto a sinistra");
   assert.doesNotMatch(t, /port busy/);
+  assert.doesNotMatch(drawn("approve-allow", { state: { ...emptyState(), approveQueue: [req()] } }), /M7\.2 18\.5 h10/, "una richiesta locale non ha la nuvola");
 });

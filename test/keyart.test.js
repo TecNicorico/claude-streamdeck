@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fit, fits, ruleLines, approveKey, usageMeterKey, statusKey, labelKey, actionKey, linesKey, burnKey, bigCountKey, gaugeKey, opzioneKey, paginaKey, domandaKey, infoKey, aCapo } from "../src/keyart.js";
+import { fit, fits, ruleLines, approveKey, usageMeterKey, statusKey, labelKey, actionKey, linesKey, burnKey, bigCountKey, gaugeKey, opzioneKey, paginaKey, domandaKey, infoKey, aCapo, decisioneKey } from "../src/keyart.js";
 
 // Every key is 144 units wide. These tests exist because two strings shipped
 // overflowing it silently: the ALWAYS key's rule line measured 199 units (clipped on
@@ -176,13 +176,28 @@ test("no report or action key overflows its box on adversarial input", () => {
 test("i tasti nuovi della riga in basso non escono mai dal loro riquadro", () => {
   const LUNGO = "un'opzione con un testo davvero molto lungo che non sta su un tasto da settantadue pixel";
   for (const label of ["Sì", "staging", LUNGO, "supercalifragilistichespiralidoso"]) {
-    assertInsideBox(opzioneKey(4, "CONFERMA 2/3", label, "thecore-v2 · cloud"), `opzione ${label}`);
-    assertInsideBox(domandaKey("INTESTAZIONELUNGA", label + " " + LUNGO, "thecore-v2 · cloud"), `domanda ${label}`);
-    assertInsideBox(infoKey("mcp_strumento_lunghissimo", aCapo(label, 13, 3), "a-very-long-project-name · cloud", "prod"), `info ${label}`);
+    assertInsideBox(opzioneKey(4, "INTESTAZIONELUNGA", label, "2/3", null, true), `opzione ${label}`);
+    assertInsideBox(domandaKey("INTESTAZIONELUNGA", label + " " + LUNGO, "1/2", true), `domanda ${label}`);
+    assertInsideBox(infoKey("database", [label], "a-very-long-project-name", "prod", { cloud: true, testo2: "STAGING · scrive" }), `info supabase ${label}`);
+    assertInsideBox(infoKey("code", aCapo(label, 15, 3), "a-very-long-project-name"), `info ${label}`);
   }
-  assertInsideBox(paginaKey("altre ▸", "3-4 di 4"), "pagina");
-  const sql = { cwd: "/home/user/thecore-v2", toolName: "mcp__Supabase__execute_sql", toolInput: { query: "delete" }, cloud: true };
-  assertInsideBox(approveKey("approve-allow", sql, { lungo: true, dettaglio: "PROD? · scrive", target: "SQL DELETE", depth: 3 }), "allow lungo");
+  assertInsideBox(paginaKey("altre 2", "opzioni 3-4", true, true), "pagina");
+  const comandi = ["npm run db:test:security", "rm -rf /a/very/long/path/that/never/ends/and/goes/on/forever", "x".repeat(80), "ls"];
+  for (const command of comandi) {
+    const req = { cwd: "/home/user/a-very-long-project-name", toolName: "Bash", toolInput: { command }, cloud: true };
+    for (const kind of ["approve-allow", "approve-deny"]) {
+      for (const o of [{}, { depth: 8 }, { lungo: true }, { lungo: true, depth: 3 }, { target: "SQL SELECT" }, { label: "etichetta-lunghissima" }]) {
+        assertInsideBox(decisioneKey(kind, req, o), `${kind} ${command.slice(0, 12)} ${JSON.stringify(o)}`);
+      }
+    }
+  }
+  for (const kind of ["approve-allow", "approve-deny"]) {
+    assertInsideBox(decisioneKey(kind, null, {}), `${kind} vuoto`);
+    assertInsideBox(decisioneKey(kind, null, { err: "port in use" }), `${kind} errore`);
+  }
+  for (const st of ["needs-approval", "input-needed", "working", "finished", "idle", "none", "quiet"]) {
+    assertInsideBox(statusKey("thecore-v2-lunghissimo", st, 1, "permission · 5s", "cloud"), `status ${st}`);
+  }
 });
 
 test("aCapo non perde la fine senza dirlo", () => {

@@ -11,7 +11,7 @@
 import path from "node:path";
 import {
   C, gaugeKey, linesKey, bigCountKey, burnKey, usageMeterKey, labelKey, actionKey,
-  statusKey, approveKey, fmtNum, aCapo, opzioneKey, paginaKey, domandaKey, infoKey,
+  statusKey, fmtNum, aCapo, decisioneKey, opzioneKey, paginaKey, domandaKey, infoKey, iconaStrumento,
 } from "./keyart.js";
 import { budgetPct, gaugeSource, familyOf } from "./usage.js";
 import {
@@ -19,7 +19,7 @@ import {
   blockedSessions,
 } from "./status.js";
 import { approvable, approvableDepth, isQuestion, describeRequest } from "./approve.js";
-import { SLOT, facce, intestazione, testoDomanda, statoIniziale } from "./domande.js";
+import { SLOT, facce, testoDomanda, statoIniziale } from "./domande.js";
 import { classifica, etichetta, bersaglio, confDa } from "./supabase.js";
 
 // The state a request still held in the approver queue implies for one session, or null.
@@ -335,44 +335,38 @@ export function rigaInBasso(kind, env) {
   const err = req?.cloud ? null : state.hookErr ?? (!state.approveQueue.length && authFlagged ? "auth?" : null);
   const depth = approvableDepth(state.approveQueue);
   const nome = req ? describeRequest(req).name : "";
-  const dove = req?.cloud ? "cloud" : "";
-  const sub = [nome, dove].filter(Boolean).join(" · ");
+  const cloud = !!req?.cloud;
 
   if (!err && req && isQuestion(req)) {
     const st = state.risposte?.get(req.id) ?? statoIniziale();
     const f = facce(req, st)[SLOT[kind]];
-    const head = intestazione(req, st);
+    const qs = req.toolInput?.questions ?? [];
+    const passo = qs.length > 1 ? `${st.passo + 1}/${qs.length}` : "";
+    const head = String(qs[st.passo]?.header || "domanda");
     const painted = { reqId: req.id, rule: null, faccia: f ? `${st.passo}:${st.pagina}:${f.tipo}:${f.indice ?? f.verso ?? ""}` : null, lungo: false };
-    if (!f) return { image: infoKey("domanda", ["—"], sub), painted };
-    if (f.tipo === "opzione") return { image: opzioneKey(f.indice + 1, head, f.label, sub, phase), painted };
-    if (f.tipo === "pagina") return { image: paginaKey(f.testo, f.verso ? "3-4 di 4" : "1-2 di 4"), painted };
-    return { image: domandaKey(head, testoDomanda(req, st), sub), painted };
+    if (!f) return { image: infoKey("question", ["—"], nome, null, { cloud }), painted };
+    if (f.tipo === "opzione") return { image: opzioneKey(f.indice + 1, head, f.label, passo, phase, cloud), painted };
+    if (f.tipo === "pagina") return { image: paginaKey("altre 2", f.verso ? "opzioni 3-4" : "opzioni 1-2", !!f.verso, cloud), painted };
+    return { image: domandaKey(head, testoDomanda(req, st), passo, cloud), painted };
   }
 
   const c = req ? classifica(req, confDa(state.globalSettings)) : null;
   if (kind === "approve-always") {
     const painted = { reqId: req?.id ?? null, rule: null, faccia: null, lungo: false };
-    if (err) return { image: infoKey("comando", ["—"], err, "prod"), painted };
-    if (!req) return { image: infoKey("comando", ["—"], "all clear"), painted };
+    if (err) return { image: infoKey("alert", ["—"], err, "prod"), painted };
+    if (!req) return { image: infoKey("dot", [], "all clear", null, { colIcona: "#4a4658" }), painted };
     if (c) {
       const tinta = !c.scrive ? "legge" : c.progetto === "STAGING" ? "staging" : "prod";
-      return { image: infoKey("supabase", [c.strumento, etichetta(c)], sub, tinta), painted };
+      return { image: infoKey("database", [c.strumento], nome, tinta, { cloud, testo2: etichetta(c) }), painted };
     }
-    const tool = String(req.toolName ?? "").replace(/^mcp__[^_]+(?:_[^_]+)*__/, "");
-    return { image: infoKey(tool || "comando", aCapo(describeRequest({ ...req, cwd: "" }).target, 13, 3), sub), painted };
+    const [icona, colIcona] = iconaStrumento(req.toolName);
+    const bersaglioPieno = req.toolName === "Bash" ? String(req.toolInput?.command ?? "") : describeRequest({ ...req, cwd: "" }).target;
+    return { image: infoKey(icona, aCapo(bersaglioPieno, 15, 3), nome, null, { cloud, colIcona, ideale: 18 }), painted };
   }
 
   const lungo = kind === "approve-allow" && !!c?.lungo;
   return {
-    image: approveKey(kind, req, {
-      label: settings.label,
-      err,
-      depth,
-      phase,
-      lungo,
-      dettaglio: c ? etichetta(c) : "",
-      target: c ? bersaglio(req, c) : "",
-    }),
+    image: decisioneKey(kind, req, { err, depth, phase, lungo, target: c ? bersaglio(req, c) : "", label: settings.label }),
     painted: { reqId: req?.id ?? null, rule: null, faccia: null, lungo },
   };
 }

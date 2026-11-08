@@ -140,6 +140,18 @@ const GLYPHS = {
   calendar: ["M4 6.5 h16 v14 H4 z", "M4 11 h16", "M8 3 v4", "M16 3 v4"],
   week: ["M4 6.5 h16 v14 H4 z", "M4 11 h16", "M8 3 v4", "M16 3 v4", "M7.5 15 h3", "M13.5 15 h3"],
   grid: ["M4 4.5 h6 v6 H4 z", "M14 4.5 h6 v6 h-6 z", "M4 13.5 h6 v6 H4 z", "M14 13.5 h6 v6 h-6 z"],
+  // Riga in basso e sessioni (fork TecNicorico): un'icona per ciò che il tasto fa o dice.
+  database: ["M5 6 a7 2.6 0 1 0 14 0 a7 2.6 0 1 0 -14 0", "M5 6 v12 a7 2.6 0 0 0 14 0 V6", "M5 12 a7 2.6 0 0 0 14 0"],
+  question: ["M12 12 m-9.5 0 a9.5 9.5 0 1 0 19 0 a9.5 9.5 0 1 0 -19 0", "M9.3 9.4 a2.8 2.8 0 1 1 4 2.5 c-0.85 0.42 -1.3 1 -1.3 2.1", "M12 17.3 v0.2"],
+  alert: ["M12 3.5 L21.5 20 H2.5 Z", "M12 9.5 v5", "M12 17.3 v0.2"],
+  spark: ["M12 3 v4", "M12 17 v4", "M3 12 h4", "M17 12 h4", "M5.6 5.6 l2.8 2.8", "M15.6 15.6 l2.8 2.8", "M5.6 18.4 l2.8 -2.8", "M15.6 8.4 l2.8 -2.8"],
+  moon: ["M19.5 14.6 A8 8 0 1 1 9.4 4.5 a6.3 6.3 0 0 0 10.1 10.1 z"],
+  cloud: ["M7.2 18.5 h10 a4 4 0 0 0 0.4 -7.98 a5.6 5.6 0 0 0 -10.9 1.5 a3.3 3.3 0 0 0 0.5 6.48 z"],
+  file: ["M6.5 3 h7.5 l4 4 v14 h-11.5 z", "M14 3 v4 h4"],
+  plug: ["M9 3 v4.5", "M15 3 v4.5", "M6.5 7.5 h11 v3 a5.5 5.5 0 0 1 -11 0 z", "M12 16 v5"],
+  arrowR: ["M4.5 12 h15", "M13.5 6 l6 6 -6 6"],
+  arrowL: ["M19.5 12 h-15", "M10.5 6 l-6 6 6 6"],
+  hold: ["M12 12 m-9.5 0 a9.5 9.5 0 1 0 19 0 a9.5 9.5 0 1 0 -19 0", "M7.5 12.5 l3 3 6 -7"],
 };
 
 // A standalone 72x72 icon for the Stream Deck action list, drawn from the same glyph
@@ -285,14 +297,20 @@ const STATUS_LOOK = {
   // couldn't stat. Saying "no status" beats inventing "Idle".
   unknown: { label: "no status", col: C.dim },
 };
+// L'icona di ogni stato, in alto a sinistra: si riconosce da lontano prima di leggere.
+const STATUS_ICON = { "needs-approval": "alert", "input-needed": "question", working: "spark", finished: "allow", idle: "moon" };
 function statusKey(name, st, count, detail = "", tag = "", phase = null) {
   const look = STATUS_LOOK[st] ?? STATUS_LOOK.none;
   const shown = String(name || "CLAUDE").slice(0, 11);
+  const icona = STATUS_ICON[st] ? glyph(STATUS_ICON[st], 10, 8, 22, look.col, 2.4) : "";
   // Count badge wins the corner; otherwise the "cli"/"code" tag, which is the only
-  // way to tell two sessions in the same project apart.
+  // way to tell two sessions in the same project apart. Una sessione nel cloud ha la
+  // nuvola al posto della parola.
+  const angolo = count > 1 ? badge(count, look.col) : tag === "cloud" ? glyph("cloud", 110, 7, 24, C.info, 2.2) : corner(tag);
   return svgWrap(`
     ${tintFrame(look.col, !!look.strong, phase)}
-    ${count > 1 ? badge(count, look.col) : corner(tag)}
+    ${icona}
+    ${angolo}
     ${line(72, 78, 128, 25, 700, st === "none" ? C.dim : C.text, shown)}
     ${line(72, 104, 130, 17, 700, look.col, look.label)}
     ${detail ? line(72, 127, 132, 13, 400, C.dim, detail) : ""}`);
@@ -463,89 +481,160 @@ function approveKey(kind, req, o = {}) {
 // Spezza un testo in al più `righe` righe di `max` caratteri, a parole; l'ultima riga
 // finisce con "…" se il testo non ci sta. line() resta il paracadute contro l'overflow.
 function aCapo(testo, max, righe) {
-  const parole = String(testo ?? "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  // Una parola più lunga della riga (un comando, un percorso) si spezza dove si spezza
+  // da sé — dopo `:` `/` `-` `.` `_` `=` `,` — e solo se non c'è, a misura di riga.
+  const pezzi = [];
+  for (const p of String(testo ?? "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean)) {
+    let resto = p;
+    while (resto.length > max) {
+      let k = max;
+      for (let i = max - 1; i >= 1; i--) if (/[:/\\\-._=,]/.test(resto[i])) { k = i + 1; break; }
+      pezzi.push(resto.slice(0, k));
+      resto = resto.slice(k);
+    }
+    if (resto) pezzi.push(resto);
+  }
   const out = [];
-  let cur = "";
-  for (let i = 0; i < parole.length; i++) {
-    const p = parole[i];
-    const prova = cur ? cur + " " + p : p;
+  let cur = "", i = 0;
+  for (; i < pezzi.length; i++) {
+    const prova = cur ? cur + " " + pezzi[i] : pezzi[i];
     if (prova.length <= max) { cur = prova; continue; }
-    if (cur) out.push(cur);
-    cur = p.length > max ? p.slice(0, max - 1) + "…" : p;
+    out.push(cur);
+    cur = pezzi[i];
     if (out.length === righe) { cur = ""; break; }
   }
-  if (cur && out.length < righe) out.push(cur);
-  const usato = out.join(" ").replace(/…/g, "").length;
-  const totale = parole.join(" ").length;
-  if (out.length && usato < totale && !out[out.length - 1].endsWith("…")) {
+  if (cur && out.length < righe) { out.push(cur); i = pezzi.length; }
+  // Rimasto fuori qualcosa: l'ultima riga lo dice con i puntini.
+  if (i < pezzi.length && out.length) {
     const u = out[out.length - 1];
     out[out.length - 1] = (u.length >= max ? u.slice(0, max - 1) : u) + "…";
   }
   return out.length ? out : ["—"];
 }
 
-const CORPO = [[92, 0], [78, 26], [68, 22], [62, 18]];
-const corpo = (righe, ideale, col = C.text) => {
-  const n = Math.min(4, righe.length);
-  const [top, step] = CORPO[n - 1] ?? CORPO[0];
-  const size = n === 1 ? ideale : n === 2 ? Math.min(ideale, 20) : n === 3 ? Math.min(ideale, 18) : 15;
-  return righe.slice(0, n).map((t, i) => line(72, top + i * step, 130, size, 700, col, t)).join("");
-};
-
-// Un'opzione di una domanda di Claude. La pressione risponde con QUESTA opzione: è
-// un'azione, quindi banda, nel viola di "input needed". Al posto del glifo il numero
-// dell'opzione, lo stesso che Claude mostra nella sua lista: un badge a destra
-// coprirebbe la fine dell'intestazione.
-function opzioneKey(numero, intestazione, label, sub, phase = null) {
-  const col = C.ask;
+// Il tasto a icona grande della riga in basso: in alto ciò che il tasto FA (un'icona da
+// 44 px, leggibile da lontano), sotto il testo che dice SU COSA, in fondo da dove viene.
+// Il colore dice quanto è delicato: verde approva, rosso rifiuta, ambra una scrittura
+// che chiede la pressione lunga, viola una domanda, blu una lettura.
+//   testo     righe principali (al più 3; con testo2, una sola)
+//   testo2    riga di dettaglio sotto, nel suo colore
+//   numero    al posto dell'icona, un disco col numero (le opzioni di una domanda)
+//   cloud     la nuvola in alto a sinistra: la richiesta viene da una sessione cloud
+//   angolo    in alto a destra: { badge: n } oppure { testo: "2 s" }
+function grandeKey(o = {}) {
+  const colIcona = o.colIcona ?? C.text;
+  const icona = o.numero != null
+    ? `<circle cx="72" cy="34" r="21" fill="${colIcona}"/>${txt(72, 43, 26, 800, C.bg, String(o.numero))}`
+    : o.icona ? glyph(o.icona, 50, 12, 44, colIcona, 3.2) : "";
+  const righe = (o.testo ?? []).filter((t) => t != null && t !== "");
+  let corpoSvg = "";
+  // 120 e non 130 di larghezza: le maiuscole in grassetto sono più larghe della stima
+  // di fit(), e «SQL SELECT» a 130 toccava i bordi del tasto.
+  const LARGO = 120;
+  if (o.testo2) {
+    corpoSvg = (righe[0] != null ? line(72, 82, LARGO, o.ideale ?? 20, 700, o.col ?? C.text, righe[0]) : "") +
+      line(72, 104, LARGO, 15, 700, o.col2 ?? C.dim, o.testo2);
+  } else if (righe.length) {
+    const n = Math.min(3, righe.length);
+    const [ys, size] = [[[88], o.ideale ?? 20], [[80, 101], Math.min(o.ideale ?? 20, 18)], [[72, 90, 108], 15]][n - 1];
+    corpoSvg = righe.slice(0, n).map((t, i) => line(72, ys[i], LARGO, size, 700, o.col ?? C.text, t)).join("");
+  }
+  // Quante ALTRE richieste aspettano dopo questa: «+1», non «2», che accanto a una
+  // pressione lunga si leggerebbe «2 secondi».
+  const altre = (o.angolo?.badge ?? 0) - 1;
+  const angolo = altre > 0
+    ? `<circle cx="119" cy="20" r="13" fill="${C.panel}" stroke="${colIcona}" stroke-width="1.5"/>` + txt(119, 25, 13, 800, C.text, `+${altre}`)
+    : o.angolo?.testo ? txt(132, 26, 15, 800, colIcona, o.angolo.testo, "end") : "";
   return svgWrap(`
-    ${tintFrame(col, true, phase)}
-    ${band.rule(col)}
-    <circle cx="21" cy="19" r="11.5" fill="${C.panel}" stroke="${col}" stroke-width="1.5"/>
-    ${txt(21, 24.5, 14, 700, C.text, numero)}
-    ${line(40, 25, 94, 16, 800, col, String(intestazione || "domanda").toUpperCase(), "start", ' letter-spacing="0.5"')}
-    ${corpo(aCapo(label, 12, 3), 22)}
-    ${foot(sub)}`);
+    ${tintFrame(o.tinta ?? null, !!o.forte, o.phase ?? null)}
+    ${o.cloud ? glyph("cloud", 9, 7, 24, C.info, 2.2) : ""}
+    ${angolo}
+    ${icona}
+    ${corpoSvg}
+    ${foot(o.piede ?? "", o.colPiede ?? C.dim)}`);
+}
+
+const SPENTO = "#4a4658"; // icona di un tasto senza niente da fare: c'è, ma non chiama
+
+// ALLOW e DENY con una richiesta (o senza): l'icona è la decisione.
+//   o.lungo      ALLOW chiede la pressione lunga (scrittura in produzione)
+//   o.target     il testo da mostrare al posto del comando (es. "SQL DELETE")
+//   o.depth      quante richieste aspettano
+function decisioneKey(kind, req, o = {}) {
+  const allow = kind === "approve-allow";
+  if (o.err) return grandeKey({ icona: "alert", colIcona: C.bad, tinta: C.bad, piede: o.err });
+  if (!req) return grandeKey({ icona: allow ? "allow" : "deny", colIcona: SPENTO, piede: "all clear" });
+  const d = describeRequest(req);
+  const testo = o.target ? [o.target] : aCapo(targetIntero(req), 14, 3);
+  // L'etichetta scelta nelle impostazioni del tasto, se c'è, prende il posto del progetto.
+  const comune = { cloud: !!req.cloud, piede: o.label || d.name, phase: o.phase ?? null, angolo: { badge: o.depth } };
+  if (allow && o.lungo) {
+    return grandeKey({
+      ...comune, icona: "hold", colIcona: C.warn, tinta: C.warn, forte: true,
+      testo: testo.slice(0, 1), testo2: "tieni premuto 2 s", col2: C.warn,
+      angolo: o.depth > 1 ? { badge: o.depth } : { testo: "2 s" },
+    });
+  }
+  const col = allow ? C.ok : C.bad;
+  return grandeKey({ ...comune, icona: allow ? "allow" : "deny", colIcona: col, tinta: col, forte: true, testo });
+}
+
+// Il comando intero, per andare a capo invece di troncarlo a 14 caratteri.
+function targetIntero(req) {
+  const t = String(req?.toolName ?? "");
+  const i = req?.toolInput ?? {};
+  if (t === "Bash" && i.command) return String(i.command).replace(/\s+/g, " ").trim();
+  return describeRequest(req).target;
+}
+
+// Un'opzione di una domanda di Claude: il disco col numero (lo stesso della lista di
+// Claude) e l'etichetta. La pressione risponde con QUESTA opzione.
+function opzioneKey(numero, intestazione, label, sub, phase = null, cloud = false) {
+  return grandeKey({
+    numero, colIcona: C.ask, tinta: C.ask, forte: true, phase, cloud,
+    testo: aCapo(label, 12, 3), piede: String(intestazione || "domanda").toUpperCase() + (sub ? ` ${sub}` : ""),
+  });
 }
 
 // Il tasto centrale con 4 opzioni: fa vedere le altre due.
-function paginaKey(testo, sub) {
-  const col = C.ask;
-  return svgWrap(`
-    ${tintFrame(col, false)}
-    ${band.rule(col, 0.5)}
-    ${actionHead("list", "opzioni", C.dim)}
-    ${line(72, 88, 128, 24, 700, C.text, testo)}
-    ${foot(sub)}`);
+function paginaKey(testo, sub, avanti = true, cloud = false) {
+  return grandeKey({ icona: avanti ? "arrowR" : "arrowL", colIcona: C.ask, tinta: C.ask, cloud, testo: [testo], piede: sub });
 }
 
-// Il tasto centrale con 2 opzioni: il testo della domanda. La pressione apre la sessione.
-function domandaKey(intestazione, testo, sub) {
-  return svgWrap(`
-    ${tintFrame(C.ask, false)}
-    ${band.cap(C.ident.focus)}
-    ${actionHead("focus", intestazione || "domanda", C.ident.focus)}
-    ${corpo(aCapo(testo, 15, 4), 16, C.text)}
-    ${foot(sub)}`);
+// Il tasto centrale con 2 opzioni: la domanda. Premuto apre la sessione.
+function domandaKey(intestazione, testo, sub, cloud = false) {
+  return grandeKey({
+    icona: "question", colIcona: C.ask, tinta: C.ask, cloud,
+    testo: aCapo(testo, 15, 3), ideale: 16, piede: String(intestazione || "domanda").toUpperCase() + (sub ? ` ${sub}` : ""),
+  });
 }
 
-// Il tasto centrale con un permesso: che cosa si sta per approvare, in grande. Rosso
-// per una scrittura in produzione, ambra su staging, blu per una lettura. La pressione
-// apre la sessione (su claude.ai se è nel cloud).
+// Il tasto centrale con un permesso: che cosa si sta per approvare. Premuto apre la
+// sessione. Per Supabase il database nel colore del rischio: rosso una scrittura in
+// produzione, ambra su staging, blu una lettura.
 const INFO_TINTA = { prod: C.bad, staging: C.warn, legge: C.info };
-function infoKey(intestazione, righe, sub, tinta = null) {
+function infoKey(icona, righe, sub, tinta = null, opz = {}) {
   const col = tinta ? INFO_TINTA[tinta] ?? null : null;
-  return svgWrap(`
-    ${tintFrame(col, tinta === "prod")}
-    ${band.cap(C.ident.focus)}
-    ${actionHead("focus", intestazione, C.ident.focus)}
-    ${corpo(righe, 21)}
-    ${foot(sub)}`);
+  if (opz.testo2) {
+    return grandeKey({ icona, colIcona: col ?? C.ident.focus, tinta: col, forte: tinta === "prod", cloud: opz.cloud, testo: righe.slice(0, 1), testo2: opz.testo2, col2: col ?? C.dim, piede: sub });
+  }
+  return grandeKey({ icona, colIcona: col ?? opz.colIcona ?? C.ident.focus, tinta: col, cloud: opz.cloud, testo: righe, ideale: opz.ideale, piede: sub });
+}
+
+// L'icona del tasto centrale secondo lo strumento che chiede il permesso.
+function iconaStrumento(toolName) {
+  const t = String(toolName ?? "");
+  if (t === "Bash") return ["code", C.ident.code];
+  if (t === "WebFetch" || t === "WebSearch") return ["web", C.ident.web];
+  if (["Edit", "Write", "Read", "NotebookEdit", "MultiEdit"].includes(t)) return ["file", C.ident.project];
+  if (t === "Task" || t === "Agent") return ["layers", C.ident.chat];
+  if (t.startsWith("mcp__")) return ["plug", C.ident.custom];
+  return ["custom", C.ident.custom];
 }
 
 export {
   C, pctColor, esc, tintFrame, svgWrap, fit, fits, txt, glyph, iconSvg, listIconSvg, ruleLines,
   gaugeKey, linesKey, bigCountKey, burnKey, usageMeterKey, labelKey, actionKey,
   STATUS_LOOK, statusKey, APPROVE_LOOK, approveKey, fmtNum,
-  aCapo, opzioneKey, paginaKey, domandaKey, infoKey,
+  aCapo, grandeKey, decisioneKey, opzioneKey, paginaKey, domandaKey, infoKey, iconaStrumento, SPENTO,
 };

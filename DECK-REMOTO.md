@@ -26,8 +26,10 @@ sessione sul PC ──hook──▶ plugin (http://127.0.0.1, come prima)
   (non possono decidere niente), la chiave **DECK** la usa lo Stream Deck per
   leggere e decidere (non può aprire richieste). Le richieste e i comandi restano
   solo in memoria, finché la sessione non ritira la risposta.
-- **Se non rispondi in tempo** (60 secondi di default), la sessione mostra la
-  richiesta normale su claude.ai. Il deck non approva mai niente da solo, e un
+- **La richiesta resta sul deck per 5 minuti** (`DECK_ATTESA_S`, fino a 600
+  secondi), anche se intanto apri la sessione su claude.ai per leggerla. Su
+  claude.ai resta rispondibile per tutto il tempo: vale la prima risposta, e se
+  rispondi lì sparisce anche dal deck. Il deck non approva mai niente da solo, e un
   guasto del relay non blocca mai Claude.
 - **Non si fanno dal deck:** le domande a scelta multipla e le risposte scritte a
   mano (si rispondono su Claude, e il tasto Waiting le segnala), e le domande della
@@ -104,14 +106,27 @@ poi **Edit**:
    DECK_RELAY_URL=https://claude-deck-relay.<tuo-nome>.workers.dev
    DECK_RELAY_TOKEN=<la chiave CLOUD>
    ```
-   Facoltativa: `DECK_ATTESA_S=60`, quanti secondi la sessione aspetta il deck prima
-   di mostrare la richiesta su claude.ai (da 5 a 600).
+   Facoltativa: `DECK_ATTESA_S=300`, per quanti secondi una richiesta resta sul
+   deck (da 5 a 600).
 2. **Accesso alla rete:** fra i domini permessi aggiungi
    `claude-deck-relay.<tuo-nome>.workers.dev`, lasciando spuntata la casella dei
    gestori di pacchetti.
-3. **Script di setup:** incolla in fondo il contenuto di
-   [`cloud/setup-ambiente.sh`](cloud/setup-ambiente.sh). Installa l'hook nella sessione
-   ogni volta che parte; le chiavi non stanno lì dentro.
+3. **Script di setup:** incolla in fondo queste righe, con l'indirizzo del tuo
+   Worker al posto di quello d'esempio (sono anche in
+   [`cloud/setup-ambiente.sh`](cloud/setup-ambiente.sh)). A ogni avvio di una sessione
+   scaricano l'hook dal tuo relay e lo installano; le chiavi non stanno lì dentro.
+   ```bash
+   DECK_RELAY="https://claude-deck-relay.<tuo-nome>.workers.dev"
+   mkdir -p "$HOME/.claude/deck"
+   if curl -fsSL --max-time 20 "$DECK_RELAY/v1/hook.mjs" -o "$HOME/.claude/deck/nuovo.mjs" && head -1 "$HOME/.claude/deck/nuovo.mjs" | grep -q '^#!/usr/bin/env node'; then
+     mv "$HOME/.claude/deck/nuovo.mjs" "$HOME/.claude/deck/deck-hook.mjs"
+     node "$HOME/.claude/deck/deck-hook.mjs" --installa || true
+   else
+     echo "deck: hook non scaricato da $DECK_RELAY" >&2
+   fi
+   ```
+   Siccome l'hook lo serve il relay, per aggiornarlo basta ripubblicare il relay
+   (`npx wrangler@4 deploy` dalla cartella `relay`): lo script non si ricopia.
 
 Vale per le sessioni nuove: quelle già aperte non cambiano.
 
@@ -141,17 +156,21 @@ I tre tasti di approvazione cambiano faccia secondo cosa c'è in attesa.
 
 | In attesa | Sinistra (Deny) | Centro (Info) | Destra (Allow) |
 |---|---|---|---|
-| niente | all clear | — | all clear |
-| un permesso | rifiuta | cosa si approva, premuto apre la sessione | approva |
-| una scrittura in produzione | rifiuta | SUPABASE · PROD · scrive | **tieni premuto 2 s** |
+| niente | ✕ spenta | — | ✓ spenta |
+| un permesso | ✕ rosso, il comando | l'icona dello strumento e il comando; premuto apre la sessione | ✓ verde, il comando |
+| una lettura Supabase | ✕ rosso | database blu · «PROD · legge» | ✓ verde, un tocco |
+| una scrittura su staging | ✕ rosso | database ambra · «STAGING · scrive» | ✓ verde, un tocco |
+| una scrittura in produzione | ✕ rosso | database rosso · «PROD · scrive» | ✓ ambra nel cerchio, **tieni premuto 2 s** |
 | domanda con 2 opzioni | opzione 1 | il testo della domanda | opzione 2 |
 | domanda con 3 opzioni | opzione 1 | opzione 2 | opzione 3 |
 | domanda con 4 opzioni | opzione 1 (poi 3) | altre ▸ / ◂ altre | opzione 2 (poi 4) |
 
-- Più richieste insieme si mettono in fila, dalla più vecchia; il numerino in alto
-  dice quante ne aspettano.
-- «cloud» in fondo al tasto vuol dire che la richiesta viene da una sessione nel
-  cloud.
+- Più richieste insieme si mettono in fila, dalla più vecchia; «+1» in alto a destra
+  vuol dire che dopo questa ce n'è un'altra.
+- La nuvola in alto a sinistra vuol dire che la richiesta viene da una sessione nel
+  cloud. Sui tasti delle sessioni la nuvola è in alto a destra, e in alto a sinistra
+  c'è l'icona dello stato: triangolo = aspetta un permesso, punto di domanda = ti fa
+  una domanda, raggiera = lavora, spunta = ha appena finito, luna = ferma.
 - Se lasci ALLOW prima dei 2 secondi, non approva e il tasto lampeggia.
 - Una domanda con più quesiti si risponde un quesito alla volta; le risposte partono
   tutte insieme alla fine.
