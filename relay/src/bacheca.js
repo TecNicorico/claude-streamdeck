@@ -18,10 +18,15 @@ export const LIMITI = {
   richieste: 20,
   // Quanto aspetta al massimo una richiesta, anche se l'hook chiede di più.
   attesaMaxS: 600,
-  attesaDefaultS: 60,
-  // L'hook richiama /attendi di continuo; se smette per più di così, è morto
-  // (Claude Code l'ha chiuso perché la persona ha risposto su claude.ai).
-  hookSilenzioMs: 15_000,
+  // Cinque minuti: il tempo di aprire la sessione su claude.ai, leggere, e tornare
+  // a rispondere dal deck. La richiesta su claude.ai resta rispondibile per tutto il tempo.
+  attesaDefaultS: 300,
+  // Quanto dura una singola attesa lunga dell'hook su /attendi (vedi index.js).
+  attesaLungaMs: 20_000,
+  // Se l'hook non si fa vivo per più di così, è morto (Claude Code l'ha chiuso). Deve
+  // stare ben sopra l'attesa lunga: fra una e l'altra l'hook tace per costruzione, e una
+  // soglia più corta faceva sparire dal deck ogni richiesta dopo un quarto di minuto.
+  hookSilenzioMs: 45_000,
   // Una sessione che non dà notizie da tanto si toglie; una «al lavoro» senza notizie
   // da un'ora e mezza si mostra ferma, perché un container morto non manda la sua fine.
   // (Gli hook non mandano un segnale per ogni strumento, apposta: costerebbe un avvio
@@ -167,8 +172,13 @@ export class Bacheca {
       return { ok: true };
     }
     const rec = this.tocca(sessione, ora);
-    const aperte = [...this.richieste.values()].some((r) => r.sessione === id);
-    if (!aperte) this.imposta(rec, evento === "lavora" ? "busy" : "idle", null, ora);
+    // Un turno che finisce, o un messaggio nuovo, vuol dire che le richieste aperte di
+    // quella sessione non aspettano più: qualcuno ha risposto su claude.ai (o ha scritto
+    // altro). Si tolgono dal deck subito, senza aspettare che l'hook se ne vada.
+    if (evento === "fine" || evento === "lavora") {
+      for (const r of [...this.richieste.values()]) if (r.sessione === id && !r.decisione) this.richieste.delete(r.id);
+    }
+    this.imposta(rec, evento === "lavora" ? "busy" : "idle", null, ora);
     this.cambiata();
     return { ok: true };
   }

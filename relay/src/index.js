@@ -10,10 +10,11 @@
 // Il relay non scrive su disco le richieste né i comandi: restano in memoria finché
 // l'hook li ritira o rinuncia. Su disco vanno solo le sessioni (nome, stato, link).
 import { DurableObject } from "cloudflare:workers";
-import { Bacheca } from "./bacheca.js";
+import { Bacheca, LIMITI } from "./bacheca.js";
+import HOOK from "./hook-testo.js";
 
 const CORPO_MAX = 128 * 1024;
-const ATTESA_LUNGA_MS = 20_000;
+const ATTESA_LUNGA_MS = LIMITI.attesaLungaMs;
 
 const json = (dati, status = 200) =>
   new Response(JSON.stringify(dati), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
@@ -52,6 +53,12 @@ export default {
     const url = new URL(request.url);
     const porta = `${request.method} ${url.pathname}`;
     if (porta === "GET /v1/salute") return json({ ok: true, configurato: !!(env.TOKEN_CLOUD && env.TOKEN_DECK) });
+    // L'hook delle sessioni cloud, scaricato dallo script di setup a ogni avvio: così un
+    // aggiornamento è un `wrangler deploy` e non un copia-incolla. È codice aperto, senza
+    // segreti (le chiavi le legge dall'ambiente), quindi non chiede una chiave.
+    if (porta === "GET /v1/hook.mjs") {
+      return new Response(HOOK, { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" } });
+    }
     const chi = PORTE[porta];
     if (!chi) return json({ errore: "NON_TROVATO" }, 404);
     const attesa = chi === "cloud" ? env.TOKEN_CLOUD : env.TOKEN_DECK;

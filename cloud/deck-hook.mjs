@@ -25,12 +25,13 @@ import { join, basename } from "node:path";
 
 const MARCA = "deck-hook.mjs";
 const EVENTI = { SessionStart: "avvio", UserPromptSubmit: "lavora", Stop: "fine", SessionEnd: "chiusa" };
-const ATTESA_DEFAULT_S = 60;
+const ATTESA_DEFAULT_S = 300;
+const ATTESA_MAX_S = 600;
 const RIFIUTO = "Rifiutato dallo Stream Deck";
 
 export function attesaS(env = process.env) {
   const n = Number(env.DECK_ATTESA_S);
-  return Number.isFinite(n) && n >= 5 && n <= 600 ? Math.round(n) : ATTESA_DEFAULT_S;
+  return Number.isFinite(n) && n >= 5 && n <= ATTESA_MAX_S ? Math.round(n) : ATTESA_DEFAULT_S;
 }
 
 // La sessione come la conosce il relay: l'id del container (da cui viene il link su
@@ -84,7 +85,7 @@ async function chiama(base, token, path, body, ms) {
   }
 }
 
-export async function gestisci(payload, { env = process.env, fetchAttesa = chiama, ora = Date.now } = {}) {
+export async function gestisci(payload, { env = process.env, fetchAttesa = chiama, ora = Date.now, quandoAperta = () => {} } = {}) {
   const base = env.DECK_RELAY_URL, token = env.DECK_RELAY_TOKEN;
   if (!base || !token || !/^https?:\/\//.test(base)) return null;
   // Solo nel cloud: sul PC le richieste le prende già il plugin, col suo hook locale.
@@ -104,6 +105,7 @@ export async function gestisci(payload, { env = process.env, fetchAttesa = chiam
     sessione, tool: payload.tool_name, input: payload.tool_input ?? {}, attesaS: s,
   }, 8_000);
   if (!aperta?.id) return null;
+  quandoAperta(aperta.id, base, token);
   const fine = ora() + s * 1000;
   while (ora() < fine) {
     const r = await fetchAttesa(base, token, "/v1/cloud/attendi", { id: aperta.id }, 25_000);
@@ -128,7 +130,11 @@ export function conHook(settings, comando, attesa) {
       .filter((g) => g.hooks.length);
     hooks[nome] = [...altri, gruppo];
   };
-  evento("PermissionRequest", nostro(attesa + 15, ""));
+  // Il timeout è il massimo possibile, non l'attesa di adesso: l'attesa la legge l'hook
+  // dall'ambiente quando parte (DECK_ATTESA_S), e lo script di setup, che scrive queste
+  // righe, l'ambiente non lo vede. Con un timeout più corto Claude Code chiuderebbe
+  // l'hook prima che finisca di aspettare.
+  evento("PermissionRequest", nostro(Math.max(attesa, ATTESA_MAX_S) + 15, ""));
   for (const nome of Object.keys(EVENTI)) evento(nome, nostro(10, null));
   out.hooks = hooks;
   return out;
@@ -155,7 +161,13 @@ async function principale() {
   if (process.argv.includes("--installa")) process.exit(installa());
   let payload = {};
   try { payload = JSON.parse(readFileSync(0, "utf8") || "{}"); } catch { return; }
-  const out = await gestisci(payload).catch(() => null);
+  // Se Claude Code chiude l'hook mentre aspetta (la persona ha risposto su claude.ai),
+  // prima di uscire lo dice al relay: la richiesta sparisce subito anche dal deck.
+  const quandoAperta = (id, base, token) => {
+    const esci = () => { chiama(base, token, "/v1/cloud/rinuncia", { id }, 2_000).finally(() => process.exit(0)); };
+    for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.once(sig, esci);
+  };
+  const out = await gestisci(payload, { quandoAperta }).catch(() => null);
   if (out) process.stdout.write(JSON.stringify(out));
 }
 

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { gestisci, rispostaPerClaude, conHook, attesaS, sessioneDa } from "../deck-hook.mjs";
-import { scriptSetup } from "../../tools/gen-setup.mjs";
+import { scriptSetup, moduloHook } from "../../tools/gen-setup.mjs";
 
 const radice = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const ENV = { DECK_RELAY_URL: "https://relay.example", DECK_RELAY_TOKEN: "c".repeat(40), CLAUDE_CODE_REMOTE: "true", CLAUDE_CODE_REMOTE_SESSION_ID: "cse_01ABCDEFGHJK" };
@@ -85,11 +85,18 @@ test("la sessione prende l'id del container, e in sua assenza quello di Claude C
   assert.equal(sessioneDa({}, {}), null);
 });
 
-test("attesa: 60 secondi, configurabile fra 5 e 600", () => {
-  assert.equal(attesaS({}), 60);
+test("attesa: 5 minuti, configurabile fra 5 e 600 secondi", () => {
+  assert.equal(attesaS({}), 300);
   assert.equal(attesaS({ DECK_ATTESA_S: "120" }), 120);
-  assert.equal(attesaS({ DECK_ATTESA_S: "2" }), 60);
-  assert.equal(attesaS({ DECK_ATTESA_S: "9999" }), 60);
+  assert.equal(attesaS({ DECK_ATTESA_S: "2" }), 300);
+  assert.equal(attesaS({ DECK_ATTESA_S: "9999" }), 300);
+});
+
+test("quando apre la richiesta lo dice, così se Claude Code lo chiude può avvisare il relay", async () => {
+  const visti = [];
+  const { f } = relayFinto({ "/v1/cloud/richiesta": { id: "r9" }, "/v1/cloud/attendi": { stato: "decisa", decisione: { tipo: "rifiuta" } } });
+  await gestisci({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: {} }, { env: ENV, fetchAttesa: f, quandoAperta: (id, base) => visti.push([id, base]) });
+  assert.deepEqual(visti, [["r9", "https://relay.example"]]);
 });
 
 test("installazione: aggiunge i nostri hook, tiene gli altri, e rifatta non si duplica", () => {
@@ -101,13 +108,20 @@ test("installazione: aggiunge i nostri hook, tiene gli altri, e rifatta non si d
   assert.equal(una.model, "x");
   assert.equal(una.hooks.PermissionRequest.length, 2);
   assert.equal(una.hooks.PermissionRequest[0].hooks[0].url, "http://altro");
-  assert.equal(una.hooks.PermissionRequest[1].hooks[0].timeout, 75, "il timeout dell'hook supera l'attesa");
+  assert.equal(una.hooks.PermissionRequest[1].hooks[0].timeout, 615, "il timeout è il massimo: l'attesa vera la legge l'hook dall'ambiente");
   assert.deepEqual(una.hooks.Stop.map((g) => g.hooks[0].command), ["echo ciao", cmd]);
   for (const ev of ["SessionStart", "UserPromptSubmit", "SessionEnd"]) assert.equal(una.hooks[ev].length, 1);
 });
 
-test("lo script di setup committato contiene l'hook di adesso", () => {
+test("il relay serve l'hook di adesso, e lo script di setup è quello generato", () => {
   const hook = readFileSync(join(radice, "cloud", "deck-hook.mjs"), "utf8");
-  const committato = readFileSync(join(radice, "cloud", "setup-ambiente.sh"), "utf8");
-  assert.equal(committato, scriptSetup(hook), "rigenera con: node tools/gen-setup.mjs");
+  assert.equal(readFileSync(join(radice, "relay", "src", "hook-testo.js"), "utf8"), moduloHook(hook), "rigenera con: node tools/gen-setup.mjs");
+  assert.equal(readFileSync(join(radice, "cloud", "setup-ambiente.sh"), "utf8"), scriptSetup(), "rigenera con: node tools/gen-setup.mjs");
+});
+
+test("lo script di setup scarica dal relay scritto dentro, e non contiene chiavi", () => {
+  const s = scriptSetup("https://claude-deck-relay.prova.workers.dev");
+  assert.match(s, /DECK_RELAY="https:\/\/claude-deck-relay\.prova\.workers\.dev"/);
+  assert.match(s, /\/v1\/hook\.mjs/);
+  assert.doesNotMatch(s, /TOKEN=|Bearer/);
 });

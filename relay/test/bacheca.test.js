@@ -136,11 +136,23 @@ test("gli stati: avvio, lavora, fine, chiusa", () => {
   assert.deepEqual(b.evento({ sessione: S, evento: "boh" }, 5000), { errore: "EVENTO_SCONOSCIUTO" });
 });
 
-test("un evento non toglie l'attesa a una sessione con una richiesta aperta", () => {
+test("un turno finito o un messaggio nuovo chiudono le richieste aperte: ha risposto qualcuno su claude.ai", () => {
+  for (const evento of ["fine", "lavora"]) {
+    const b = new Bacheca();
+    const { id } = b.apri({ sessione: S, tool: "Bash", input: {} }, 1000);
+    b.apri({ sessione: { id: "cse_01ALTRASESSIONE" }, tool: "Bash", input: {} }, 1000);
+    b.evento({ sessione: S, evento }, 1100);
+    assert.deepEqual(b.perDeck(0).richieste.map((r) => r.sessione), ["cse_01ALTRASESSIONE"], evento);
+    assert.deepEqual(b.ritira(id, 1200), { stato: "sconosciuta" }, "l'hook ancora in attesa la trova chiusa e tace");
+    assert.notEqual(b.perDeck(0).sessioni.find((s) => s.id === S.id).status, "waiting");
+  }
+});
+
+test("l'avvio di una sessione non tocca le sue richieste", () => {
   const b = new Bacheca();
   b.apri({ sessione: S, tool: "Bash", input: {} }, 1000);
-  b.evento({ sessione: S, evento: "lavora" }, 1100);
-  assert.equal(b.perDeck(0).sessioni[0].status, "waiting");
+  b.evento({ sessione: S, evento: "avvio" }, 1100);
+  assert.equal(b.perDeck(0).richieste.length, 1);
 });
 
 test("una sessione «al lavoro» senza notizie da un'ora e mezza si mostra ferma, e dopo otto ore sparisce", () => {
@@ -175,4 +187,23 @@ test("senza sessione o senza strumento non si apre niente", () => {
   const b = new Bacheca();
   assert.deepEqual(b.apri({ sessione: {}, tool: "Bash" }, 0), { errore: "SESSIONE_MANCANTE" });
   assert.deepEqual(b.apri({ sessione: S, tool: "" }, 0), { errore: "TOOL_MANCANTE" });
+});
+
+// Il bug dell'08/11/2026: l'hook aspetta la decisione in attese lunghe da 20 s, e fra
+// una e l'altra non si fa sentire. Con la soglia di silenzio a 15 s ogni richiesta non
+// decisa entro un quarto di minuto spariva dal deck, mentre il deck leggeva la bacheca
+// ogni secondo e mezzo (e quindi faceva girare la manutenzione).
+test("una richiesta resta sul deck finché l'hook la aspetta in attese lunghe", () => {
+  const b = new Bacheca();
+  const { id, scade } = b.apri({ sessione: S, tool: "AskUserQuestion", input: DOMANDA, attesaS: 300 }, 0);
+  let prossimoRitiro = 0;
+  for (let t = 0; t < scade - 1_000; t += 1_500) {
+    if (t >= prossimoRitiro) { b.ritira(id, t); prossimoRitiro = t + LIMITI.attesaLungaMs; }
+    b.manutenzione(t);
+    assert.equal(b.perDeck(t).richieste.length, 1, `sparita a ${t / 1000} s`);
+  }
+});
+
+test("la soglia di silenzio supera l'attesa lunga con margine", () => {
+  assert.ok(LIMITI.hookSilenzioMs >= LIMITI.attesaLungaMs * 2, `${LIMITI.hookSilenzioMs} contro ${LIMITI.attesaLungaMs}`);
 });
