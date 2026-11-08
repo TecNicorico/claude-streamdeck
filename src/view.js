@@ -16,7 +16,7 @@ import {
 import { budgetPct, gaugeSource, familyOf } from "./usage.js";
 import {
   resolveStatusKey, statusEntry, sessionWhere, fmtShort, shortWait, sessionState,
-  blockedSessions,
+  blockedSessions, titoloSessione,
 } from "./status.js";
 import { approvable, approvableDepth, isQuestion, describeRequest } from "./approve.js";
 import { SLOT, facce, testoDomanda, statoIniziale } from "./domande.js";
@@ -307,7 +307,7 @@ export function viewFor(kind, env) {
       }
       const blockedNow = entry.state === "needs-approval" || entry.state === "input-needed";
       const fresh = blockedNow && (!entry.waitingSince || now - entry.waitingSince < PULSE_MS);
-      return img(statusKey(name, entry.state, explicit ? resolved.count : 1, detail, entry.where, fresh ? animPhase : null));
+      return img(statusKey(name, entry.state, explicit ? resolved.count : 1, detail, entry.where, fresh ? animPhase : null, entry.titolo));
     }
     case "approver-waiting": {
       // Dark and quiet until a session is actually blocked on you.
@@ -327,7 +327,7 @@ export function viewFor(kind, env) {
       const waited = since ? fmtShort(now - since) : "";
       const why = shortWait(b.waitingFor ?? p?.reason ?? "") || "needs you";
       const fresh = !since || now - since < PULSE_MS;
-      return img(statusKey(path.basename(b.cwd ?? "") || "claude", st, blocked.length, why + (waited ? " · " + waited : ""), sessionWhere(b), fresh ? animPhase : null));
+      return img(statusKey(path.basename(b.cwd ?? "") || "claude", st, blocked.length, why + (waited ? " · " + waited : ""), sessionWhere(b), fresh ? animPhase : null, titoloSessione(b)));
     }
     case "approve-allow":
     case "approve-always":

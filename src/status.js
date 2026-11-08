@@ -31,6 +31,16 @@ export function sessionWhere(s) {
   return "";
 }
 
+// Il nome di una sessione, se dice qualcosa in più della sua cartella: il titolo che il
+// relay dà a una sessione cloud (le prime parole del primo messaggio), o il nome di una
+// sessione locale quando non l'ha derivato Claude Code dalla cartella («thecore-v2-4f»,
+// `nameSource: "derived"`) ma l'ha dato una persona (/rename) o l'app.
+export function titoloSessione(s) {
+  if (s?.titolo) return String(s.titolo);
+  if (s?.name && s.nameSource && s.nameSource !== "derived") return String(s.name);
+  return "";
+}
+
 // Best-guess path of a session's transcript. Claude Code stores them as
 // <projects>/<slugified cwd>/<sessionId>.jsonl, where the slug replaces path
 // separators and underscores with "-". On Windows a cwd is "C:\\Users\\me\\proj",
@@ -238,6 +248,7 @@ export function resolveStatusKey(sessions, project, autoIdx = 0, now = Date.now(
         pid: s.pid ?? null,
         // Il link su claude.ai di una sessione cloud: la pressione apre quello.
         url: s.url ?? null,
+        titolo: titoloSessione(s),
         where: sessionWhere(s),
       };
     });
@@ -252,6 +263,6 @@ export function resolveStatusKey(sessions, project, autoIdx = 0, now = Date.now(
 // "none" placeholder when nothing is bound.
 export function statusEntry(resolved, cycleIdx = null) {
   const i = cycleIdx != null ? cycleIdx : resolved.index;
-  return resolved.list[i] ?? { name: "", state: "none", waitingFor: "", statusAge: 0, waitingSince: null, cwd: "", sessionId: null, pid: null, url: null, where: "" };
+  return resolved.list[i] ?? { name: "", state: "none", waitingFor: "", statusAge: 0, waitingSince: null, cwd: "", sessionId: null, pid: null, url: null, titolo: "", where: "" };
 }
 

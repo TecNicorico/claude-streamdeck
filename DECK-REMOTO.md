@@ -150,6 +150,16 @@ vale come produzione.
 pannello copia il testo di «One-time setup» e incollalo dentro `"hooks"` nel file
 `%USERPROFILE%\.claude\settings.json`, poi riavvia le sessioni di Claude Code.
 
+## Il titolo della sessione sui tasti Status
+
+Sotto il nome della repo, al posto della parola dello stato («Working»), c'è il titolo
+della sessione; lo stato resta nel colore del riquadro e del titolo e nell'icona in
+alto a sinistra. Per una sessione nel cloud il titolo sono le prime parole del suo
+primo messaggio (quello di claude.ai dentro la sessione non arriva), e il relay lo
+tiene finché la sessione esiste. Per una sessione sul PC è il nome che le hai dato con
+`/rename` o che le ha dato l'app; il nome che Claude Code ricava dalla cartella
+(«thecore-v2-4f») non dice niente di nuovo, e lì resta la parola dello stato.
+
 ## I tasti dei consumi possono fare da Deny e Allow
 
 Se non vuoi tenere Deny e Allow sempre sul deck, i tasti che mostrano e basta

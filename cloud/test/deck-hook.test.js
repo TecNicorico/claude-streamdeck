@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { gestisci, rispostaPerClaude, conHook, attesaS, sessioneDa } from "../deck-hook.mjs";
+import { gestisci, rispostaPerClaude, conHook, attesaS, sessioneDa, titoloDa, TITOLO_MAX } from "../deck-hook.mjs";
 import { scriptSetup, moduloHook } from "../../tools/gen-setup.mjs";
 
 const radice = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -124,4 +124,22 @@ test("lo script di setup scarica dal relay scritto dentro, e non contiene chiavi
   assert.match(s, /DECK_RELAY="https:\/\/claude-deck-relay\.prova\.workers\.dev"/);
   assert.match(s, /\/v1\/hook\.mjs/);
   assert.doesNotMatch(s, /TOKEN=|Bearer/);
+});
+
+test("il titolo della sessione: la prima riga del messaggio, mai un comando", () => {
+  const ups = (prompt) => ({ hook_event_name: "UserPromptSubmit", prompt });
+  assert.equal(titoloDa(ups("  \n Sistema la mappa delle scuole\nAltre righe")), "Sistema la mappa delle scuole");
+  assert.equal(titoloDa(ups("/compact")), "", "un comando non è un titolo");
+  assert.equal(titoloDa(ups("")), "");
+  assert.equal(titoloDa({ hook_event_name: "Stop", prompt: "ciao" }), "", "solo dal messaggio della persona");
+  const lungo = titoloDa(ups("parola ".repeat(30)));
+  assert.ok(lungo.length <= TITOLO_MAX && lungo.endsWith("…"));
+});
+
+test("lo stato «lavora» porta il titolo al relay, gli altri eventi no", async () => {
+  const { f, chiamate } = relayFinto({ "/v1/cloud/stato": { ok: true } });
+  await gestisci({ hook_event_name: "UserPromptSubmit", prompt: "Aggiungi il pulsante", cwd: "/home/user/thecore-v2" }, { env: ENV, fetchAttesa: f });
+  await gestisci({ hook_event_name: "Stop", cwd: "/home/user/thecore-v2" }, { env: ENV, fetchAttesa: f });
+  assert.equal(chiamate[0].body.sessione.titolo, "Aggiungi il pulsante");
+  assert.equal("titolo" in chiamate[1].body.sessione, false);
 });

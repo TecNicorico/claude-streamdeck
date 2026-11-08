@@ -110,6 +110,8 @@ function sessioneDa(s) {
     nome: pulisci(s?.nome, 60) || "cloud",
     cwd: pulisci(s?.cwd, 300),
     url: urlSessione(s?.idRemoto ?? s?.id),
+    // Le prime parole del primo messaggio: il sottotitolo del tasto della sessione.
+    titolo: pulisci(s?.titolo, 60).trim(),
   };
 }
 
@@ -137,7 +139,10 @@ export class Bacheca {
     const base = sessioneDa(s);
     if (!base) return null;
     const prima = this.sessioni.get(base.id);
-    const rec = prima ? { ...prima, ...base, aggiornata: ora } : { ...base, stato: "idle", statoDal: ora, iniziata: ora, aggiornata: ora };
+    // Il titolo lo dà il primo messaggio, e poi resta: come su claude.ai.
+    const rec = prima
+      ? { ...prima, ...base, titolo: prima.titolo || base.titolo, aggiornata: ora }
+      : { ...base, stato: "idle", statoDal: ora, iniziata: ora, aggiornata: ora };
     this.sessioni.set(base.id, rec);
     if (this.sessioni.size > LIMITI.sessioni) {
       const vecchia = [...this.sessioni.values()].sort((a, b) => a.aggiornata - b.aggiornata)[0];
@@ -270,7 +275,7 @@ export class Bacheca {
       versione: this.versione,
       ora,
       sessioni: [...this.sessioni.values()].map((s) => ({
-        id: s.id, nome: s.nome, cwd: s.cwd, url: s.url,
+        id: s.id, nome: s.nome, cwd: s.cwd, url: s.url, titolo: s.titolo || "",
         status: s.stato, waitingFor: s.attesa, statusUpdatedAt: s.statoDal,
         updatedAt: s.aggiornata, startedAt: s.iniziata,
       })),

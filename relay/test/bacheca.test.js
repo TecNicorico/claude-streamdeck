@@ -207,3 +207,21 @@ test("una richiesta resta sul deck finché l'hook la aspetta in attese lunghe", 
 test("la soglia di silenzio supera l'attesa lunga con margine", () => {
   assert.ok(LIMITI.hookSilenzioMs >= LIMITI.attesaLungaMs * 2, `${LIMITI.hookSilenzioMs} contro ${LIMITI.attesaLungaMs}`);
 });
+
+test("il titolo della sessione è quello del primo messaggio, e poi resta", () => {
+  const b = new Bacheca();
+  b.evento({ sessione: { ...S, titolo: "Sistema la mappa delle scuole" }, evento: "lavora" }, 1000);
+  b.evento({ sessione: { ...S, titolo: "e adesso un'altra cosa" }, evento: "lavora" }, 2000);
+  b.evento({ sessione: S, evento: "fine" }, 3000);
+  assert.equal(b.perDeck(0).sessioni[0].titolo, "Sistema la mappa delle scuole");
+  b.evento({ sessione: { id: "cse_01SENZATITOLO" }, evento: "avvio" }, 4000);
+  assert.equal(b.perDeck(0).sessioni.find((s) => s.id === "cse_01SENZATITOLO").titolo, "");
+});
+
+test("un titolo con caratteri di controllo o troppo lungo si pulisce", () => {
+  const b = new Bacheca();
+  b.evento({ sessione: { ...S, titolo: "riga\u0007 sporca " + "x".repeat(200) }, evento: "lavora" }, 0);
+  const t = b.perDeck(0).sessioni[0].titolo;
+  assert.ok(t.length <= 60);
+  assert.ok(!/\p{Cc}/u.test(t));
+});

@@ -41,7 +41,22 @@ export function sessioneDa(payload, env = process.env) {
   const id = idRemoto || String(payload?.session_id ?? "");
   if (!id) return null;
   const cwd = String(payload?.cwd ?? "");
-  return { id, idRemoto, nome: basename(cwd) || "cloud", cwd };
+  const out = { id, idRemoto, nome: basename(cwd) || "cloud", cwd };
+  const titolo = titoloDa(payload);
+  if (titolo) out.titolo = titolo;
+  return out;
+}
+
+// Il sottotitolo del tasto della sessione: le prime parole del messaggio, come il
+// titolo che claude.ai dà alla sessione (che dentro il container non arriva). Il relay
+// tiene solo quello del primo messaggio. Un comando (/qualcosa) non è un titolo.
+export const TITOLO_MAX = 60;
+export function titoloDa(payload) {
+  if (payload?.hook_event_name !== "UserPromptSubmit") return "";
+  const riga = String(payload?.prompt ?? "").split("\n").map((r) => r.trim()).find(Boolean) ?? "";
+  if (!riga || riga.startsWith("/")) return "";
+  const t = riga.replace(/\s+/g, " ");
+  return t.length > TITOLO_MAX ? t.slice(0, TITOLO_MAX - 1).trimEnd() + "…" : t;
 }
 
 // La decisione del deck tradotta nella risposta che Claude Code si aspetta. Una

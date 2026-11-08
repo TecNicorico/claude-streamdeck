@@ -532,3 +532,13 @@ test("solo i tasti che mostrano e basta possono fare da riga in basso", () => {
   }
   assert.equal(slotDi("usage-session", { slot: "approve-always-allow" }), null, "un valore sconosciuto non vale");
 });
+
+// ---------- il titolo della sessione al posto della parola dello stato ----------
+test("con un titolo, il tasto Status mostra il titolo invece di «Working»", () => {
+  const conTitolo = { ...emptyState(), sessions: [session({ status: "busy", titolo: "Sistema la mappa delle scuole" })] };
+  const t = drawn("approver-status", { state: conTitolo, autoSlot: 0 });
+  assert.match(t, /Sistema la/);
+  assert.doesNotMatch(t, /Working/);
+  const senza = { ...emptyState(), sessions: [session({ status: "busy" })] };
+  assert.match(drawn("approver-status", { state: senza, autoSlot: 0 }), /Working/, "senza titolo resta la parola dello stato");
+});

@@ -197,6 +197,9 @@ test("i tasti nuovi della riga in basso non escono mai dal loro riquadro", () =>
   }
   for (const st of ["needs-approval", "input-needed", "working", "finished", "idle", "none", "quiet"]) {
     assertInsideBox(statusKey("thecore-v2-lunghissimo", st, 1, "permission · 5s", "cloud"), `status ${st}`);
+    for (const titolo of ["Mappa", "Sistema la mappa delle scuole e poi altre cose ancora", "x".repeat(60)]) {
+      assertInsideBox(statusKey("thecore-v2-lunghissimo", st, 3, "permission · 5s", "cloud", null, titolo), `status ${st} ${titolo.slice(0, 8)}`);
+    }
   }
 });
 

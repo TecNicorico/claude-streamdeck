@@ -299,7 +299,7 @@ const STATUS_LOOK = {
 };
 // L'icona di ogni stato, in alto a sinistra: si riconosce da lontano prima di leggere.
 const STATUS_ICON = { "needs-approval": "alert", "input-needed": "question", working: "spark", finished: "allow", idle: "moon" };
-function statusKey(name, st, count, detail = "", tag = "", phase = null) {
+function statusKey(name, st, count, detail = "", tag = "", phase = null, sottotitolo = "") {
   const look = STATUS_LOOK[st] ?? STATUS_LOOK.none;
   const shown = String(name || "CLAUDE").slice(0, 11);
   const icona = STATUS_ICON[st] ? glyph(STATUS_ICON[st], 10, 8, 22, look.col, 2.4) : "";
@@ -311,9 +311,18 @@ function statusKey(name, st, count, detail = "", tag = "", phase = null) {
     ${tintFrame(look.col, !!look.strong, phase)}
     ${icona}
     ${angolo}
+    ${sottotitolo ? conTitolo(shown, sottotitolo, look.col) : `
     ${line(72, 78, 128, 25, 700, st === "none" ? C.dim : C.text, shown)}
-    ${line(72, 104, 130, 17, 700, look.col, look.label)}
+    ${line(72, 104, 130, 17, 700, look.col, look.label)}`}
     ${detail ? line(72, 127, 132, 13, 400, C.dim, detail) : ""}`);
+}
+
+// Con un titolo, il titolo prende il posto della parola dello stato («Working»): lo
+// stato resta nel colore del riquadro, del titolo e nell'icona in alto a sinistra.
+function conTitolo(nome, titolo, col) {
+  const righe = aCapo(titolo, 16, 2);
+  return line(72, righe.length > 1 ? 70 : 78, 128, 22, 700, C.text, nome) +
+    righe.map((t, i) => line(72, (righe.length > 1 ? 93 : 103) + i * 17, 130, 15, 700, col, t)).join("");
 }
 
 function fmtNum(n) {

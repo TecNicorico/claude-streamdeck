@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { sessioniCloud, richiesteNuove, richiesteSparite, voceDa, decisioneDa, intervallo, urlValido } from "../src/relay.js";
 import { decisionBody, answerBody } from "../src/approve.js";
-import { sessionState, resolveStatusKey, sessionWhere } from "../src/status.js";
+import { sessionState, resolveStatusKey, sessionWhere, titoloSessione } from "../src/status.js";
 
 const SNAP = {
   versione: 3, ora: 1_000_000,
@@ -65,4 +65,17 @@ test("l'indirizzo del relay deve essere https", () => {
   assert.equal(urlValido("http://127.0.0.1:8787"), true, "wrangler dev, sullo stesso computer");
   assert.equal(urlValido("http://127.0.0.1.evil.example"), false);
   assert.equal(urlValido(""), false);
+});
+
+test("il titolo di una sessione cloud arriva al tasto Status", () => {
+  const snap = { ...SNAP, sessioni: [{ ...SNAP.sessioni[0], titolo: "Sistema la mappa" }] };
+  const [s] = sessioniCloud(snap, 1_000_000);
+  assert.equal(resolveStatusKey([s], "", 0, 1_000_000).list[0].titolo, "Sistema la mappa");
+});
+
+test("una sessione locale mostra il suo nome solo se non è quello derivato dalla cartella", () => {
+  assert.equal(titoloSessione({ name: "thecore-v2-4f", nameSource: "derived" }), "");
+  assert.equal(titoloSessione({ name: "Deploy di venerdì", nameSource: "user" }), "Deploy di venerdì");
+  assert.equal(titoloSessione({ name: "senza fonte" }), "", "senza nameSource non si sa: meglio niente");
+  assert.equal(titoloSessione({ titolo: "dal relay", name: "x", nameSource: "user" }), "dal relay");
 });

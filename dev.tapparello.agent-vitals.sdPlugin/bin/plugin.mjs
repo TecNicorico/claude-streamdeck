@@ -4065,6 +4065,11 @@ function sessionWhere(s) {
   if (e.includes("vscode")) return "code";
   return "";
 }
+function titoloSessione(s) {
+  if (s?.titolo) return String(s.titolo);
+  if (s?.name && s.nameSource && s.nameSource !== "derived") return String(s.name);
+  return "";
+}
 function transcriptPathFor(projectsDir, s) {
   if (!s?.cwd || !s?.sessionId) return null;
   return joinPath(projectsDir, slugifyCwd(s.cwd), `${s.sessionId}.jsonl`);
@@ -4171,6 +4176,7 @@ function resolveStatusKey(sessions, project, autoIdx = 0, now = Date.now(), acti
       pid: s.pid ?? null,
       // Il link su claude.ai di una sessione cloud: la pressione apre quello.
       url: s.url ?? null,
+      titolo: titoloSessione(s),
       where: sessionWhere(s)
     };
   });
@@ -4178,7 +4184,7 @@ function resolveStatusKey(sessions, project, autoIdx = 0, now = Date.now(), acti
 }
 function statusEntry(resolved, cycleIdx = null) {
   const i = cycleIdx != null ? cycleIdx : resolved.index;
-  return resolved.list[i] ?? { name: "", state: "none", waitingFor: "", statusAge: 0, waitingSince: null, cwd: "", sessionId: null, pid: null, url: null, where: "" };
+  return resolved.list[i] ?? { name: "", state: "none", waitingFor: "", statusAge: 0, waitingSince: null, cwd: "", sessionId: null, pid: null, url: null, titolo: "", where: "" };
 }
 
 // src/plugin.js
@@ -4532,6 +4538,7 @@ function sessioniCloud(snap, adesso) {
     startedAt: t(s.startedAt),
     entrypoint: "cloud",
     url: typeof s.url === "string" && s.url.startsWith("https://claude.ai/code/session_") ? s.url : null,
+    titolo: typeof s.titolo === "string" ? s.titolo.slice(0, 60) : "",
     cloud: true
   }));
 }
@@ -4771,7 +4778,7 @@ var STATUS_LOOK = {
   unknown: { label: "no status", col: C.dim }
 };
 var STATUS_ICON = { "needs-approval": "alert", "input-needed": "question", working: "spark", finished: "allow", idle: "moon" };
-function statusKey(name, st, count, detail = "", tag = "", phase = null) {
+function statusKey(name, st, count, detail = "", tag = "", phase = null, sottotitolo = "") {
   const look = STATUS_LOOK[st] ?? STATUS_LOOK.none;
   const shown = String(name || "CLAUDE").slice(0, 11);
   const icona = STATUS_ICON[st] ? glyph(STATUS_ICON[st], 10, 8, 22, look.col, 2.4) : "";
@@ -4780,9 +4787,14 @@ function statusKey(name, st, count, detail = "", tag = "", phase = null) {
     ${tintFrame(look.col, !!look.strong, phase)}
     ${icona}
     ${angolo}
+    ${sottotitolo ? conTitolo(shown, sottotitolo, look.col) : `
     ${line(72, 78, 128, 25, 700, st === "none" ? C.dim : C.text, shown)}
-    ${line(72, 104, 130, 17, 700, look.col, look.label)}
+    ${line(72, 104, 130, 17, 700, look.col, look.label)}`}
     ${detail ? line(72, 127, 132, 13, 400, C.dim, detail) : ""}`);
+}
+function conTitolo(nome, titolo, col) {
+  const righe = aCapo(titolo, 16, 2);
+  return line(72, righe.length > 1 ? 70 : 78, 128, 22, 700, C.text, nome) + righe.map((t, i) => line(72, (righe.length > 1 ? 93 : 103) + i * 17, 130, 15, 700, col, t)).join("");
 }
 function fmtNum(n) {
   if (n == null) return "--";
@@ -5270,7 +5282,7 @@ function viewFor(kind, env) {
       }
       const blockedNow = entry.state === "needs-approval" || entry.state === "input-needed";
       const fresh = blockedNow && (!entry.waitingSince || now - entry.waitingSince < PULSE_MS);
-      return img(statusKey(name, entry.state, explicit ? resolved.count : 1, detail, entry.where, fresh ? animPhase2 : null));
+      return img(statusKey(name, entry.state, explicit ? resolved.count : 1, detail, entry.where, fresh ? animPhase2 : null, entry.titolo));
     }
     case "approver-waiting": {
       const blocked = blockedSessions(state2.sessions, now, state2.activity, state2.pending);
@@ -5286,7 +5298,7 @@ function viewFor(kind, env) {
       const waited = since ? fmtShort(now - since) : "";
       const why = shortWait(b.waitingFor ?? p?.reason ?? "") || "needs you";
       const fresh = !since || now - since < PULSE_MS;
-      return img(statusKey(path2.basename(b.cwd ?? "") || "claude", st, blocked.length, why + (waited ? " \xB7 " + waited : ""), sessionWhere(b), fresh ? animPhase2 : null));
+      return img(statusKey(path2.basename(b.cwd ?? "") || "claude", st, blocked.length, why + (waited ? " \xB7 " + waited : ""), sessionWhere(b), fresh ? animPhase2 : null, titoloSessione(b)));
     }
     case "approve-allow":
     case "approve-always":

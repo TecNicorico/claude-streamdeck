@@ -32,6 +32,7 @@ export function sessioniCloud(snap, adesso) {
     startedAt: t(s.startedAt),
     entrypoint: "cloud",
     url: typeof s.url === "string" && s.url.startsWith("https://claude.ai/code/session_") ? s.url : null,
+    titolo: typeof s.titolo === "string" ? s.titolo.slice(0, 60) : "",
     cloud: true,
   }));
 }
