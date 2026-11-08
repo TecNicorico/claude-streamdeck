@@ -11,14 +11,16 @@
 import path from "node:path";
 import {
   C, gaugeKey, linesKey, bigCountKey, burnKey, usageMeterKey, labelKey, actionKey,
-  statusKey, approveKey, fmtNum,
+  statusKey, approveKey, fmtNum, aCapo, opzioneKey, paginaKey, domandaKey, infoKey,
 } from "./keyart.js";
 import { budgetPct, gaugeSource, familyOf } from "./usage.js";
 import {
   resolveStatusKey, statusEntry, sessionWhere, fmtShort, shortWait, sessionState,
   blockedSessions,
 } from "./status.js";
-import { approvable, approvableDepth, alwaysRule, denyBlock } from "./approve.js";
+import { approvable, approvableDepth, isQuestion, describeRequest } from "./approve.js";
+import { SLOT, facce, intestazione, testoDomanda, statoIniziale } from "./domande.js";
+import { classifica, etichetta, bersaglio, confDa } from "./supabase.js";
 
 // The state a request still held in the approver queue implies for one session, or null.
 // Read by every key that asks "is this session blocked", because for a VS Code session
@@ -145,7 +147,7 @@ export function viewFor(kind, env) {
   const {
     state, settings = {}, now, animPhase = null, usageViewMode = "cost",
     pressedModelIdx = null, cycleIdx = -1, focus = null, autoSlot = 0,
-    authFlagged = false, defaultCodeDir = "",
+    defaultCodeDir = "",
   } = env;
   const img = (image) => ({ image });
 
@@ -197,7 +199,7 @@ export function viewFor(kind, env) {
       // needs you, and the key advertises that with the reason + a warm accent.
       const blocked = blockedSessions(state.sessions, now, state.activity, state.pending);
       const pool = blocked.length ? blocked : state.sessions;
-      const poolSig = pool.map((x) => x.pid).join(",");
+      const poolSig = pool.map((x) => x.pid ?? x.sessionId).join(",");
       // Only trust the remembered index while the pool is unchanged; otherwise
       // show the top of the pool rather than a session the user never focused.
       const s = pool.length ? (focus && focus.sig === poolSig ? pool[focus.i % pool.length] : pool[0]) : null;
@@ -311,36 +313,66 @@ export function viewFor(kind, env) {
     }
     case "approve-allow":
     case "approve-always":
-    case "approve-deny": {
-      // `approvable`, not the raw head: a question-kind request is never painted as a
-      // permission triad (it cannot be answered from a key), but a real prompt QUEUED
-      // BEHIND one still must be. The WAITING key reports the question instead.
-      const req = approvable(state.approveQueue);
-      const fresh = req && now - req.receivedAt < PULSE_MS;
-      // A mis-pasted or stale URL 404s inside our own handler, so it IS countable —
-      // but only REPEATED 404s are evidence of that; see authFlagged in plugin.js.
-      // Gated on the RAW queue, not on `req`: a held question is still proof that a
-      // correctly-pathed request arrived, so the URL demonstrably works.
-      const err = state.hookErr
-        ?? (!state.approveQueue.length && authFlagged ? "auth?" : null);
-      return {
-        image: approveKey(kind, req, {
-          sessionOnly: !!settings.sessionOnly,
-          label: settings.label,
-          err,
-          depth: approvableDepth(state.approveQueue),
-          phase: fresh ? animPhase : null,
-          denied: kind === "approve-always" && req ? denyBlock(state.denies, req, now) : null,
-        }),
-        // What this key is PAINTING. The press guard compares against it, so a press
-        // can never answer a request the user did not see. Returned rather than
-        // written here so this stays a pure function; the caller records it.
-        painted: {
-          reqId: req?.id ?? null,
-          rule: kind === "approve-always" && req ? alwaysRule(req, !!settings.sessionOnly) : null,
-        },
-      };
-    }
+    case "approve-deny":
+      return rigaInBasso(kind, env);
   }
   return {};
+}
+
+// La riga in basso: DENY / centro / ALLOW. Con un permesso sono rifiuta, che cosa si
+// sta approvando, approva; con una domanda diventano le sue opzioni (domande.js).
+// Il tasto centrale era ALWAYS: non scrive più regole permanenti, mai.
+//
+// `painted` registra ciò che il tasto ha DISEGNATO — la richiesta, la faccia della
+// domanda, se chiedeva la pressione lunga — perché una pressione non risponda mai a
+// qualcosa che la persona non ha visto.
+export function rigaInBasso(kind, env) {
+  const { state, settings = {}, now, animPhase = null, authFlagged = false } = env;
+  const req = approvable(state.approveQueue);
+  const fresh = req && now - req.receivedAt < PULSE_MS;
+  const phase = fresh ? animPhase : null;
+  // Un guasto dell'hook locale non riguarda le richieste del cloud.
+  const err = req?.cloud ? null : state.hookErr ?? (!state.approveQueue.length && authFlagged ? "auth?" : null);
+  const depth = approvableDepth(state.approveQueue);
+  const nome = req ? describeRequest(req).name : "";
+  const dove = req?.cloud ? "cloud" : "";
+  const sub = [nome, dove].filter(Boolean).join(" · ");
+
+  if (!err && req && isQuestion(req)) {
+    const st = state.risposte?.get(req.id) ?? statoIniziale();
+    const f = facce(req, st)[SLOT[kind]];
+    const head = intestazione(req, st);
+    const painted = { reqId: req.id, rule: null, faccia: f ? `${st.passo}:${st.pagina}:${f.tipo}:${f.indice ?? f.verso ?? ""}` : null, lungo: false };
+    if (!f) return { image: infoKey("domanda", ["—"], sub), painted };
+    if (f.tipo === "opzione") return { image: opzioneKey(f.indice + 1, head, f.label, sub, phase), painted };
+    if (f.tipo === "pagina") return { image: paginaKey(f.testo, f.verso ? "3-4 di 4" : "1-2 di 4"), painted };
+    return { image: domandaKey(head, testoDomanda(req, st), sub), painted };
+  }
+
+  const c = req ? classifica(req, confDa(state.globalSettings)) : null;
+  if (kind === "approve-always") {
+    const painted = { reqId: req?.id ?? null, rule: null, faccia: null, lungo: false };
+    if (err) return { image: infoKey("comando", ["—"], err, "prod"), painted };
+    if (!req) return { image: infoKey("comando", ["—"], "all clear"), painted };
+    if (c) {
+      const tinta = !c.scrive ? "legge" : c.progetto === "STAGING" ? "staging" : "prod";
+      return { image: infoKey("supabase", [c.strumento, etichetta(c)], sub, tinta), painted };
+    }
+    const tool = String(req.toolName ?? "").replace(/^mcp__[^_]+(?:_[^_]+)*__/, "");
+    return { image: infoKey(tool || "comando", aCapo(describeRequest({ ...req, cwd: "" }).target, 13, 3), sub), painted };
+  }
+
+  const lungo = kind === "approve-allow" && !!c?.lungo;
+  return {
+    image: approveKey(kind, req, {
+      label: settings.label,
+      err,
+      depth,
+      phase,
+      lungo,
+      dettaglio: c ? etichetta(c) : "",
+      target: c ? bersaglio(req, c) : "",
+    }),
+    painted: { reqId: req?.id ?? null, rule: null, faccia: null, lungo },
+  };
 }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fit, fits, ruleLines, approveKey, usageMeterKey, statusKey, labelKey, actionKey, linesKey, burnKey, bigCountKey, gaugeKey } from "../src/keyart.js";
+import { fit, fits, ruleLines, approveKey, usageMeterKey, statusKey, labelKey, actionKey, linesKey, burnKey, bigCountKey, gaugeKey, opzioneKey, paginaKey, domandaKey, infoKey, aCapo } from "../src/keyart.js";
 
 // Every key is 144 units wide. These tests exist because two strings shipped
 // overflowing it silently: the ALWAYS key's rule line measured 199 units (clipped on
@@ -171,4 +171,23 @@ test("no report or action key overflows its box on adversarial input", () => {
   assertInsideBox(labelKey("PROJECT", "agent-vitals", "set folder in settings"), "label");
   assertInsideBox(actionKey("launch", "launch", "Desktop", "claude app"), "action");
   assertInsideBox(actionKey("web", "claude.ai", LONG, LONG), "action long");
+});
+
+test("i tasti nuovi della riga in basso non escono mai dal loro riquadro", () => {
+  const LUNGO = "un'opzione con un testo davvero molto lungo che non sta su un tasto da settantadue pixel";
+  for (const label of ["Sì", "staging", LUNGO, "supercalifragilistichespiralidoso"]) {
+    assertInsideBox(opzioneKey(4, "CONFERMA 2/3", label, "thecore-v2 · cloud"), `opzione ${label}`);
+    assertInsideBox(domandaKey("INTESTAZIONELUNGA", label + " " + LUNGO, "thecore-v2 · cloud"), `domanda ${label}`);
+    assertInsideBox(infoKey("mcp_strumento_lunghissimo", aCapo(label, 13, 3), "a-very-long-project-name · cloud", "prod"), `info ${label}`);
+  }
+  assertInsideBox(paginaKey("altre ▸", "3-4 di 4"), "pagina");
+  const sql = { cwd: "/home/user/thecore-v2", toolName: "mcp__Supabase__execute_sql", toolInput: { query: "delete" }, cloud: true };
+  assertInsideBox(approveKey("approve-allow", sql, { lungo: true, dettaglio: "PROD? · scrive", target: "SQL DELETE", depth: 3 }), "allow lungo");
+});
+
+test("aCapo non perde la fine senza dirlo", () => {
+  assert.deepEqual(aCapo("Sì, procedi con la migration", 12, 3), ["Sì, procedi", "con la", "migration"]);
+  const tre = aCapo("uno due tre quattro cinque sei sette otto nove dieci undici dodici", 12, 3);
+  assert.equal(tre.length, 3);
+  assert.ok(tre[2].endsWith("…"));
 });

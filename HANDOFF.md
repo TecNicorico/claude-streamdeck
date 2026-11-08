@@ -335,3 +335,29 @@ command passthrough in Claude Code).
   gitignored on purpose — cache is machine-local runtime state, the logo is
   a personal-use asset not licensed for redistribution in this OSS repo).
 - Don't assume transcript line count == message count. See dedup section above.
+
+## Fork TecNicorico: cloud, domande, Supabase (1.9.0)
+
+Guida utente in italiano: `DECK-REMOTO.md`. Per chi tocca il codice:
+
+- `relay/` è un Worker Cloudflare a parte (non entra nel bundle del plugin). La logica
+  sta in `relay/src/bacheca.js`, pura e testata; `index.js` è solo Worker + Durable
+  Object. Due chiavi, due porte: TOKEN_CLOUD apre richieste, TOKEN_DECK decide.
+- `cloud/deck-hook.mjs` è l'hook che gira nelle sessioni cloud; `cloud/setup-ambiente.sh`
+  lo contiene per intero ed è GENERATO da `tools/gen-setup.mjs`. Un test fallisce se i
+  due divergono.
+- Nel plugin una richiesta cloud entra nella stessa `approveQueue` delle locali, con
+  `cloud: true`, `cloudId` e un ticket che traduce la risposta per il relay
+  (`src/relay.js`). Salta `staleIds` e scade col suo `holdMs`. Le sessioni cloud sono
+  record come quelli di `~/.claude/sessions` con `pid: null`, `entrypoint: "cloud"` e
+  `url`: chi apre una sessione passa da `apriRecord`, che apre l'URL o la finestra.
+- La riga in basso è `rigaInBasso` in `src/view.js`. Il tasto `approve-always` è il
+  centro: info sul permesso o una faccia della domanda. **Non scrive mai regole**: il
+  percorso `decisionBody("always")` resta in `approve.js` ma nessuna pressione lo usa.
+- Le domande (AskUserQuestion) a scelta singola con 2-4 opzioni sono `answerable`
+  (`src/domande.js`); la risposta è `answerBody`, cioè `updatedInput.answers`, verificata
+  in una sessione cloud vera l'08/11/2026. Ogni pressione su una faccia si confronta con
+  la faccia DISEGNATA (`painted.faccia`).
+- `src/supabase.js` decide lettura/scrittura e PROD/STAGING. Nel dubbio scrittura, e un
+  progetto sconosciuto vale produzione. ALLOW con `painted.lungo` approva solo dopo 2 s
+  tenuto premuto (`keyUp` prima = avviso).

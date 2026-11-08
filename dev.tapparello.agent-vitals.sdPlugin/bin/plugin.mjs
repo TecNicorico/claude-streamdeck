@@ -4061,6 +4061,7 @@ var ACTIVITY_MS = 6e4;
 function sessionWhere(s) {
   const e = String(s?.entrypoint ?? "");
   if (e === "cli") return "cli";
+  if (e === "cloud") return "cloud";
   if (e.includes("vscode")) return "code";
   return "";
 }
@@ -4168,6 +4169,8 @@ function resolveStatusKey(sessions, project, autoIdx = 0, now = Date.now(), acti
       cwd: s.cwd ?? "",
       sessionId: s.sessionId ?? null,
       pid: s.pid ?? null,
+      // Il link su claude.ai di una sessione cloud: la pressione apre quello.
+      url: s.url ?? null,
       where: sessionWhere(s)
     };
   });
@@ -4175,11 +4178,52 @@ function resolveStatusKey(sessions, project, autoIdx = 0, now = Date.now(), acti
 }
 function statusEntry(resolved, cycleIdx = null) {
   const i = cycleIdx != null ? cycleIdx : resolved.index;
-  return resolved.list[i] ?? { name: "", state: "none", waitingFor: "", statusAge: 0, waitingSince: null, cwd: "", sessionId: null, pid: null, where: "" };
+  return resolved.list[i] ?? { name: "", state: "none", waitingFor: "", statusAge: 0, waitingSince: null, cwd: "", sessionId: null, pid: null, url: null, where: "" };
 }
 
 // src/plugin.js
 import { randomBytes } from "node:crypto";
+
+// src/domande.js
+var SLOT = { "approve-deny": 0, "approve-always": 1, "approve-allow": 2 };
+var MAX_OPZIONI = 4;
+var MAX_DOMANDE = 4;
+function domandaRispondibile(req) {
+  if (String(req?.toolName ?? "") !== "AskUserQuestion") return false;
+  const qs = req?.toolInput?.questions;
+  if (!Array.isArray(qs) || !qs.length || qs.length > MAX_DOMANDE) return false;
+  return qs.every((q) => q && typeof q.question === "string" && q.question && !q.multiSelect && Array.isArray(q.options) && q.options.length >= 2 && q.options.length <= MAX_OPZIONI && q.options.every((o) => o && typeof o.label === "string" && o.label));
+}
+var statoIniziale = () => ({ passo: 0, pagina: 0, risposte: {} });
+function facce(req, stato = statoIniziale()) {
+  const qs = req?.toolInput?.questions ?? [];
+  const q = qs[stato.passo];
+  if (!q) return [null, null, null];
+  const opz = q.options.map((o, indice) => ({ tipo: "opzione", indice, label: o.label }));
+  if (opz.length === 2) return [opz[0], { tipo: "domanda" }, opz[1]];
+  if (opz.length === 3) return [opz[0], opz[1], opz[2]];
+  return stato.pagina === 0 ? [opz[0], { tipo: "pagina", verso: 1, testo: "altre \u25B8" }, opz[1]] : [opz[2], { tipo: "pagina", verso: 0, testo: "\u25C2 altre" }, opz[3]];
+}
+function premi(req, stato, slot) {
+  const qs = req?.toolInput?.questions ?? [];
+  const faccia = facce(req, stato)[slot];
+  if (!faccia || faccia.tipo === "domanda") return { stato, risposte: null, nulla: true };
+  if (faccia.tipo === "pagina") return { stato: { ...stato, pagina: faccia.verso }, risposte: null };
+  const q = qs[stato.passo];
+  const risposte = { ...stato.risposte, [q.question]: faccia.label };
+  if (stato.passo + 1 < qs.length) {
+    return { stato: { passo: stato.passo + 1, pagina: 0, risposte }, risposte: null };
+  }
+  return { stato: { ...stato, risposte }, risposte };
+}
+function intestazione(req, stato = statoIniziale()) {
+  const qs = req?.toolInput?.questions ?? [];
+  const q = qs[stato.passo];
+  if (!q) return "";
+  const h = String(q.header || "domanda").toUpperCase();
+  return qs.length > 1 ? `${h} ${stato.passo + 1}/${qs.length}` : h;
+}
+var testoDomanda = (req, stato = statoIniziale()) => String(req?.toolInput?.questions?.[stato.passo]?.question ?? "");
 
 // src/approve.js
 var DENY_MESSAGE = "Denied from Stream Deck";
@@ -4214,6 +4258,10 @@ function decisionBody(kind, req, opts = {}) {
   const entry = oneSafeRule(req, !!opts.sessionOnly);
   if (!entry) return null;
   return wrap({ behavior: "allow", updatedPermissions: [entry] });
+}
+function answerBody(req, answers) {
+  const input = req?.toolInput && typeof req.toolInput === "object" ? req.toolInput : {};
+  return wrap({ behavior: "allow", updatedInput: { ...input, answers } });
 }
 var NAME_MAX = 11;
 var TARGET_MAX = 14;
@@ -4262,15 +4310,11 @@ function rememberDeny(denies, req, now) {
   const kept = pruneDenies(denies, now).filter((d) => d.rule !== rule);
   return rule ? [...kept, { rule, at: now }] : kept;
 }
-function denyBlock(denies, req, now) {
-  const rule = alwaysRule(req);
-  if (!rule) return null;
-  return (denies ?? []).some((d) => d.rule === rule && now - d.at < DENY_WINDOW_MS) ? "just denied" : null;
-}
 var QUESTION_TOOLS = /* @__PURE__ */ new Set(["AskUserQuestion"]);
 var isQuestion = (req) => QUESTION_TOOLS.has(String(req?.toolName ?? ""));
-var approvable = (queue) => (queue ?? []).find((r) => !isQuestion(r)) ?? null;
-var approvableDepth = (queue) => (queue ?? []).filter((r) => !isQuestion(r)).length;
+var answerable = (r) => !isQuestion(r) || domandaRispondibile(r);
+var approvable = (queue) => (queue ?? []).find(answerable) ?? null;
+var approvableDepth = (queue) => (queue ?? []).filter(answerable).length;
 var PEND_RANK = { "needs-approval": 0, "input-needed": 1 };
 function pendingBySession(queue) {
   const out = /* @__PURE__ */ new Map();
@@ -4284,7 +4328,7 @@ function pendingBySession(queue) {
   return out;
 }
 var QUEUE_MAX = 8;
-var HOLD_S_DEFAULT = 20;
+var HOLD_S_DEFAULT = 60;
 var YOUNG_MS = 1e4;
 function enqueue(queue, req) {
   const next = [...queue, req];
@@ -4312,7 +4356,7 @@ function resolve(queue, id) {
   const req = queue.find((r) => r.id === id) ?? null;
   return { queue: req ? queue.filter((r) => r.id !== id) : queue, req };
 }
-var expiredIds = (queue, now, holdMs) => queue.filter((r) => now - r.receivedAt > holdMs).map((r) => r.id);
+var expiredIds = (queue, now, holdMs) => queue.filter((r) => now - r.receivedAt > (r.holdMs ?? holdMs)).map((r) => r.id);
 function seedBaselines(queue, sessions, activity) {
   if (!queue.some((r) => !r.baselined)) return queue;
   return queue.map((r) => {
@@ -4330,6 +4374,7 @@ function seedBaselines(queue, sessions, activity) {
 function staleIds(queue, sessions, activity, now) {
   const out = [];
   for (const r of queue) {
+    if (r.cloud) continue;
     if (!r.baselined) continue;
     if (now - r.receivedAt < YOUNG_MS) continue;
     const matches = (sessions ?? []).filter((s2) => s2.sessionId === r.sessionId);
@@ -4475,6 +4520,78 @@ function startHookServer({ port, secret, onRequest, onDrop, log: log2 = () => {
     attempt();
   });
 }
+
+// src/relay.js
+var PREFISSO = "cloud:";
+function sessioniCloud(snap, adesso) {
+  if (!snap || !Array.isArray(snap.sessioni)) return [];
+  const delta = Number.isFinite(snap.ora) ? adesso - snap.ora : 0;
+  const t = (v) => Number.isFinite(v) ? v + delta : void 0;
+  return snap.sessioni.map((s) => ({
+    sessionId: PREFISSO + s.id,
+    pid: null,
+    cwd: s.cwd || `/${s.nome ?? "cloud"}`,
+    name: s.nome ?? "cloud",
+    status: s.status ?? "idle",
+    waitingFor: s.waitingFor ?? void 0,
+    statusUpdatedAt: t(s.statusUpdatedAt),
+    updatedAt: t(s.updatedAt),
+    startedAt: t(s.startedAt),
+    entrypoint: "cloud",
+    url: typeof s.url === "string" && s.url.startsWith("https://claude.ai/code/session_") ? s.url : null,
+    cloud: true
+  }));
+}
+function richiesteNuove(queue, snap, decise = /* @__PURE__ */ new Set()) {
+  if (!snap || !Array.isArray(snap.richieste)) return [];
+  const presenti = new Set((queue ?? []).filter((r) => r.cloud).map((r) => r.cloudId));
+  return snap.richieste.filter((r) => r?.id && !presenti.has(r.id) && !decise.has(r.id));
+}
+function richiesteSparite(queue, snap) {
+  if (!snap || !Array.isArray(snap.richieste)) return [];
+  const vive = new Set(snap.richieste.map((r) => r?.id));
+  return (queue ?? []).filter((r) => r.cloud && !vive.has(r.cloudId)).map((r) => r.id);
+}
+function voceDa(r, sessioni, adesso, snapOra) {
+  const delta = Number.isFinite(snapOra) ? adesso - snapOra : 0;
+  const s = (sessioni ?? []).find((x) => x.sessionId === PREFISSO + r.sessione);
+  const ricevuta = Number.isFinite(r.ricevuta) ? r.ricevuta + delta : adesso;
+  const scade = Number.isFinite(r.scade) ? r.scade + delta : adesso + 6e4;
+  return {
+    cloud: true,
+    cloudId: r.id,
+    receivedAt: ricevuta,
+    holdMs: Math.max(1e3, scade - ricevuta),
+    sessionId: PREFISSO + r.sessione,
+    cwd: s?.cwd ?? "",
+    toolName: String(r.tool ?? ""),
+    toolInput: r.input ?? {},
+    troncato: !!r.troncato,
+    suggestions: [],
+    statusSnapshot: null,
+    activitySnapshot: null,
+    baselined: true
+  };
+}
+function decisioneDa(body) {
+  const d = body?.hookSpecificOutput?.decision;
+  if (!d) return null;
+  if (d.behavior === "deny") return { tipo: "rifiuta" };
+  if (d.behavior !== "allow") return null;
+  if (Array.isArray(d.updatedPermissions) && d.updatedPermissions.length) return null;
+  const answers = d.updatedInput?.answers;
+  if (answers && typeof answers === "object") return { tipo: "rispondi", risposte: answers };
+  return { tipo: "approva" };
+}
+function intervallo({ errori = 0, snap = null } = {}) {
+  if (errori > 0) return Math.min(6e4, 3e3 * 2 ** Math.min(errori, 5));
+  const vivo = snap && ((snap.richieste ?? []).length || (snap.sessioni ?? []).some((s) => s.status === "busy" || s.status === "waiting"));
+  return vivo ? 1500 : 4e3;
+}
+var urlValido = (u) => {
+  const v = String(u ?? "").trim();
+  return /^https:\/\/[^\s/]+(\/[^\s]*)?$/.test(v) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/[^\s]*)?$/.test(v);
+};
 
 // src/view.js
 import path2 from "node:path";
@@ -4751,7 +4868,9 @@ function approveKey(kind, req, o = {}) {
   };
   if (o.err) return shell(C.bad, 1, [], o.err);
   if (!req) return shell(C.dim, 0.4, [], "all clear");
-  const { name, target } = describeRequest(req);
+  const d = describeRequest(req);
+  const name = req.cloud ? `${d.name} \xB7 cloud` : d.name;
+  const target = o.target || d.target;
   const rule = kind === "approve-always" ? alwaysRule(req, !!o.sessionOnly) : null;
   const denied = kind === "approve-always" && rule !== null && !!o.denied;
   const disabled = kind === "approve-always" && (rule === null || denied);
@@ -4759,6 +4878,9 @@ function approveKey(kind, req, o = {}) {
   const mult = disabled ? 0.4 : 1;
   const cornerSvg = o.depth > 1 ? badge(o.depth, col) : corner(o.label);
   const word = kind === "approve-always" ? denied ? "ALWAYS" : rule === null ? "ALWAYS n/a" : `ALWAYS \xB7${o.sessionOnly ? "ses" : "prj"}` : look.word;
+  if (kind === "approve-allow" && o.lungo) {
+    return shell(C.warn, 1, [{ t: target, max: 22 }, { t: o.dettaglio || "tieni premuto", col: C.warn, max: 16 }], "tieni premuto 2 s", cornerSvg, "ALLOW 2s");
+  }
   if (denied) {
     return shell(col, mult, ruleLines(rule).map((t) => ({ t, col: C.dim, max: 18 })), String(o.denied), cornerSvg, word);
   }
@@ -4766,6 +4888,169 @@ function approveKey(kind, req, o = {}) {
   const lines = kind === "approve-always" && rule != null ? ruleLines(rule).map((t) => ({ t, max: 19 })) : [{ t: shown, max: 24 }];
   return shell(col, mult, lines, name, cornerSvg, word);
 }
+function aCapo(testo, max, righe) {
+  const parole = String(testo ?? "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  const out = [];
+  let cur = "";
+  for (let i = 0; i < parole.length; i++) {
+    const p = parole[i];
+    const prova = cur ? cur + " " + p : p;
+    if (prova.length <= max) {
+      cur = prova;
+      continue;
+    }
+    if (cur) out.push(cur);
+    cur = p.length > max ? p.slice(0, max - 1) + "\u2026" : p;
+    if (out.length === righe) {
+      cur = "";
+      break;
+    }
+  }
+  if (cur && out.length < righe) out.push(cur);
+  const usato = out.join(" ").replace(/…/g, "").length;
+  const totale = parole.join(" ").length;
+  if (out.length && usato < totale && !out[out.length - 1].endsWith("\u2026")) {
+    const u = out[out.length - 1];
+    out[out.length - 1] = (u.length >= max ? u.slice(0, max - 1) : u) + "\u2026";
+  }
+  return out.length ? out : ["\u2014"];
+}
+var CORPO = [[92, 0], [78, 26], [68, 22], [62, 18]];
+var corpo = (righe, ideale, col = C.text) => {
+  const n = Math.min(4, righe.length);
+  const [top, step] = CORPO[n - 1] ?? CORPO[0];
+  const size = n === 1 ? ideale : n === 2 ? Math.min(ideale, 20) : n === 3 ? Math.min(ideale, 18) : 15;
+  return righe.slice(0, n).map((t, i) => line(72, top + i * step, 130, size, 700, col, t)).join("");
+};
+function opzioneKey(numero, intestazione2, label, sub, phase = null) {
+  const col = C.ask;
+  return svgWrap(`
+    ${tintFrame(col, true, phase)}
+    ${band.rule(col)}
+    <circle cx="21" cy="19" r="11.5" fill="${C.panel}" stroke="${col}" stroke-width="1.5"/>
+    ${txt(21, 24.5, 14, 700, C.text, numero)}
+    ${line(40, 25, 94, 16, 800, col, String(intestazione2 || "domanda").toUpperCase(), "start", ' letter-spacing="0.5"')}
+    ${corpo(aCapo(label, 12, 3), 22)}
+    ${foot(sub)}`);
+}
+function paginaKey(testo, sub) {
+  const col = C.ask;
+  return svgWrap(`
+    ${tintFrame(col, false)}
+    ${band.rule(col, 0.5)}
+    ${actionHead("list", "opzioni", C.dim)}
+    ${line(72, 88, 128, 24, 700, C.text, testo)}
+    ${foot(sub)}`);
+}
+function domandaKey(intestazione2, testo, sub) {
+  return svgWrap(`
+    ${tintFrame(C.ask, false)}
+    ${band.cap(C.ident.focus)}
+    ${actionHead("focus", intestazione2 || "domanda", C.ident.focus)}
+    ${corpo(aCapo(testo, 15, 4), 16, C.text)}
+    ${foot(sub)}`);
+}
+var INFO_TINTA = { prod: C.bad, staging: C.warn, legge: C.info };
+function infoKey(intestazione2, righe, sub, tinta = null) {
+  const col = tinta ? INFO_TINTA[tinta] ?? null : null;
+  return svgWrap(`
+    ${tintFrame(col, tinta === "prod")}
+    ${band.cap(C.ident.focus)}
+    ${actionHead("focus", intestazione2, C.ident.focus)}
+    ${corpo(righe, 21)}
+    ${foot(sub)}`);
+}
+
+// src/supabase.js
+var SOLO_LETTURA = /* @__PURE__ */ new Set([
+  "list_projects",
+  "get_project",
+  "list_organizations",
+  "get_organization",
+  "list_tables",
+  "list_extensions",
+  "list_migrations",
+  "get_logs",
+  "query_logs",
+  "get_advisors",
+  "get_project_url",
+  "get_anon_key",
+  "get_publishable_keys",
+  "list_edge_functions",
+  "get_edge_function",
+  "list_branches",
+  "search_docs",
+  "generate_typescript_types",
+  "get_cost",
+  "confirm_cost",
+  "list_storage_buckets",
+  "get_storage_config"
+]);
+var SQL_SCRIVE = /\b(insert|update|delete|merge|truncate|drop|alter|create|grant|revoke|copy|call|into|vacuum|refresh|lock|notify|execute|prepare)\b/i;
+var SQL_EFFETTI = /\b(set_config|pg_terminate_backend|pg_cancel_backend|nextval|setval|pg_advisory\w*|lo_\w+|dblink\w*|pg_reload_conf|pg_switch_wal|pg_promote|pg_file_\w+|pg_read_\w+|pg_ls_\w+|pg_sleep\w*)\s*\(|\b[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*\s*\(/i;
+function sqlNudo(sql) {
+  return String(sql ?? "").replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\$([A-Za-z_]*)\$[\s\S]*?\$\1\$/g, " '' ").replace(/'(?:[^']|'')*'/g, " '' ").replace(/"(?:[^"]|"")*"/g, " x ");
+}
+function sqlLegge(sql, troncato = false) {
+  if (troncato) return false;
+  const nudo = sqlNudo(sql).trim().replace(/;\s*$/, "");
+  if (!nudo) return false;
+  if (nudo.includes(";")) return false;
+  if (!/^(select|with|explain|show|values|table)\b/i.test(nudo)) return false;
+  if (/^explain\b/i.test(nudo) && /\banalyze\b/i.test(nudo)) return false;
+  return !SQL_SCRIVE.test(nudo) && !SQL_EFFETTI.test(nudo);
+}
+var parti = (toolName) => String(toolName ?? "").split("__");
+function strumentoSupabase(toolName) {
+  const [pre, server, ...resto] = parti(toolName);
+  if (pre !== "mcp" || !server || !resto.length) return null;
+  return /supabase/i.test(server) ? resto.join("__") : null;
+}
+var CLI_SCRIVE = /\b(db\s+(push|reset|dump\s+--data-only)|migration\s+(repair|squash|up|down)|functions\s+(deploy|delete)|secrets\s+(set|unset)|projects\s+(create|delete)|branches\s+(create|delete|update)|link|storage\s+(rm|mv|cp)|config\s+push|sso|domains)\b/i;
+var refs = (s) => String(s ?? "").split(/[\s,;]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+function progettoDi(ref, conf) {
+  const r = String(ref ?? "").toLowerCase();
+  if (r && refs(conf?.prod).includes(r)) return "PROD";
+  if (r && refs(conf?.staging).includes(r)) return "STAGING";
+  return "?";
+}
+function classifica(req, conf = {}) {
+  const tool = String(req?.toolName ?? "");
+  const input = req?.toolInput && typeof req.toolInput === "object" ? req.toolInput : {};
+  const s = strumentoSupabase(tool);
+  if (s) {
+    const progetto = progettoDi(input.project_id ?? input.projectId ?? input.project_ref, conf);
+    let scrive;
+    if (s === "execute_sql") scrive = !sqlLegge(input.query, !!req?.troncato);
+    else scrive = !SOLO_LETTURA.has(s);
+    return { strumento: s, progetto, scrive, lungo: scrive && progetto !== "STAGING" };
+  }
+  if (tool === "Bash") {
+    const cmd = String(input.command ?? "");
+    if (!/\bsupabase\b/i.test(cmd)) return null;
+    const scrive = CLI_SCRIVE.test(cmd);
+    const nominato = refs(conf.prod).find((r) => cmd.toLowerCase().includes(r)) ? "PROD" : refs(conf.staging).find((r) => cmd.toLowerCase().includes(r)) ? "STAGING" : "?";
+    return { strumento: "supabase CLI", progetto: nominato, scrive, lungo: scrive && nominato !== "STAGING" };
+  }
+  return null;
+}
+var etichetta = (c) => c ? `${c.progetto === "?" ? "PROD?" : c.progetto} \xB7 ${c.scrive ? "scrive" : "legge"}` : "";
+function bersaglio(req, c) {
+  if (!c) return null;
+  const input = req?.toolInput ?? {};
+  if (c.strumento === "execute_sql") {
+    const primo = sqlNudo(input.query).trim().split(/\s+/)[0] ?? "";
+    return `SQL ${primo.toUpperCase()}`.trim();
+  }
+  if (c.strumento === "apply_migration" && input.name) return String(input.name);
+  if (c.strumento === "deploy_edge_function" && (input.name || input.slug)) return String(input.name || input.slug);
+  if (c.strumento === "supabase CLI") {
+    const m = /\bsupabase\s+([a-z-]+(?:\s+[a-z-]+)?)/i.exec(String(input.command ?? ""));
+    return m ? m[1] : "supabase";
+  }
+  return c.strumento;
+}
+var confDa = (gs) => ({ prod: gs?.supabaseProd ?? "", staging: gs?.supabaseStaging ?? "" });
 
 // src/view.js
 var pendKindOf = (state2, s) => state2.pending?.get(s?.sessionId)?.kind ?? null;
@@ -4842,7 +5127,6 @@ function viewFor(kind, env) {
     cycleIdx = -1,
     focus = null,
     autoSlot: autoSlot2 = 0,
-    authFlagged: authFlagged2 = false,
     defaultCodeDir = ""
   } = env;
   const img = (image) => ({ image });
@@ -4889,7 +5173,7 @@ function viewFor(kind, env) {
     case "focus-session": {
       const blocked = blockedSessions(state2.sessions, now, state2.activity, state2.pending);
       const pool = blocked.length ? blocked : state2.sessions;
-      const poolSig = pool.map((x) => x.pid).join(",");
+      const poolSig = pool.map((x) => x.pid ?? x.sessionId).join(",");
       const s = pool.length ? focus && focus.sig === poolSig ? pool[focus.i % pool.length] : pool[0] : null;
       if (blocked.length) {
         const b = s ?? blocked[0];
@@ -4990,30 +5274,56 @@ function viewFor(kind, env) {
     }
     case "approve-allow":
     case "approve-always":
-    case "approve-deny": {
-      const req = approvable(state2.approveQueue);
-      const fresh = req && now - req.receivedAt < PULSE_MS;
-      const err = state2.hookErr ?? (!state2.approveQueue.length && authFlagged2 ? "auth?" : null);
-      return {
-        image: approveKey(kind, req, {
-          sessionOnly: !!settings.sessionOnly,
-          label: settings.label,
-          err,
-          depth: approvableDepth(state2.approveQueue),
-          phase: fresh ? animPhase2 : null,
-          denied: kind === "approve-always" && req ? denyBlock(state2.denies, req, now) : null
-        }),
-        // What this key is PAINTING. The press guard compares against it, so a press
-        // can never answer a request the user did not see. Returned rather than
-        // written here so this stays a pure function; the caller records it.
-        painted: {
-          reqId: req?.id ?? null,
-          rule: kind === "approve-always" && req ? alwaysRule(req, !!settings.sessionOnly) : null
-        }
-      };
-    }
+    case "approve-deny":
+      return rigaInBasso(kind, env);
   }
   return {};
+}
+function rigaInBasso(kind, env) {
+  const { state: state2, settings = {}, now, animPhase: animPhase2 = null, authFlagged: authFlagged2 = false } = env;
+  const req = approvable(state2.approveQueue);
+  const fresh = req && now - req.receivedAt < PULSE_MS;
+  const phase = fresh ? animPhase2 : null;
+  const err = req?.cloud ? null : state2.hookErr ?? (!state2.approveQueue.length && authFlagged2 ? "auth?" : null);
+  const depth = approvableDepth(state2.approveQueue);
+  const nome = req ? describeRequest(req).name : "";
+  const dove = req?.cloud ? "cloud" : "";
+  const sub = [nome, dove].filter(Boolean).join(" \xB7 ");
+  if (!err && req && isQuestion(req)) {
+    const st = state2.risposte?.get(req.id) ?? statoIniziale();
+    const f = facce(req, st)[SLOT[kind]];
+    const head = intestazione(req, st);
+    const painted = { reqId: req.id, rule: null, faccia: f ? `${st.passo}:${st.pagina}:${f.tipo}:${f.indice ?? f.verso ?? ""}` : null, lungo: false };
+    if (!f) return { image: infoKey("domanda", ["\u2014"], sub), painted };
+    if (f.tipo === "opzione") return { image: opzioneKey(f.indice + 1, head, f.label, sub, phase), painted };
+    if (f.tipo === "pagina") return { image: paginaKey(f.testo, f.verso ? "3-4 di 4" : "1-2 di 4"), painted };
+    return { image: domandaKey(head, testoDomanda(req, st), sub), painted };
+  }
+  const c = req ? classifica(req, confDa(state2.globalSettings)) : null;
+  if (kind === "approve-always") {
+    const painted = { reqId: req?.id ?? null, rule: null, faccia: null, lungo: false };
+    if (err) return { image: infoKey("comando", ["\u2014"], err, "prod"), painted };
+    if (!req) return { image: infoKey("comando", ["\u2014"], "all clear"), painted };
+    if (c) {
+      const tinta = !c.scrive ? "legge" : c.progetto === "STAGING" ? "staging" : "prod";
+      return { image: infoKey("supabase", [c.strumento, etichetta(c)], sub, tinta), painted };
+    }
+    const tool = String(req.toolName ?? "").replace(/^mcp__[^_]+(?:_[^_]+)*__/, "");
+    return { image: infoKey(tool || "comando", aCapo(describeRequest({ ...req, cwd: "" }).target, 13, 3), sub), painted };
+  }
+  const lungo = kind === "approve-allow" && !!c?.lungo;
+  return {
+    image: approveKey(kind, req, {
+      label: settings.label,
+      err,
+      depth,
+      phase,
+      lungo,
+      dettaglio: c ? etichetta(c) : "",
+      target: c ? bersaglio(req, c) : ""
+    }),
+    painted: { reqId: req?.id ?? null, rule: null, faccia: null, lungo }
+  };
 }
 
 // src/plugin.js
@@ -5093,6 +5403,13 @@ var state = {
   hookSecret: null,
   hookPort: PORT_DEFAULT,
   hookErr: null,
+  // Sessioni: quelle di questo computer (pollSessions) e quelle nel cloud (pollRelay).
+  // state.sessions è sempre la loro unione, rifatta da pubblicaSessioni().
+  localSessions: [],
+  cloudSessions: [],
+  // id richiesta -> a che punto è la risposta a una domanda (domande.js)
+  risposte: /* @__PURE__ */ new Map(),
+  relay: { ok: false, err: null, at: 0, errori: 0, sessioni: 0 },
   lastHeadChangeAt: 0,
   globalSettings: {},
   pluginUUID: null
@@ -5300,14 +5617,19 @@ async function pollSessions() {
         if (!gone.size) renderApproveAll();
       }
     }
-    const nextSig = sessionSig(out, Date.now(), state.activity, state.pending);
-    const changed = nextSig !== lastSessionSig;
-    lastSessionSig = nextSig;
-    state.sessions = out;
-    if (changed) renderAll(["sessions", "focus-session", "approver-status", "approver-waiting"]);
+    state.localSessions = out;
+    pubblicaSessioni();
   } catch (e) {
     log("sessions poll failed:", String(e));
   }
+}
+function pubblicaSessioni() {
+  const tutte = [...state.localSessions, ...state.cloudSessions];
+  const nextSig = sessionSig(tutte, Date.now(), state.activity, state.pending);
+  const changed = nextSig !== lastSessionSig;
+  lastSessionSig = nextSig;
+  state.sessions = tutte;
+  if (changed) renderAll(["sessions", "focus-session", "approver-status", "approver-waiting"]);
 }
 var APPROVE_KINDS = ["approve-allow", "approve-always", "approve-deny"];
 var HOLD_MS = () => (Number(state.globalSettings.hookHoldS) || HOLD_S_DEFAULT) * 1e3;
@@ -5318,6 +5640,7 @@ var renderApproveAll = () => renderAll(APPROVE_KINDS);
 var hasApproveKey = () => [...views.values()].some((v) => APPROVE_KINDS.includes(v.kind));
 function queueChanged() {
   state.pending = pendingBySession(state.approveQueue);
+  for (const id of [...state.risposte.keys()]) if (!state.approveQueue.some((r) => r.id === id)) state.risposte.delete(id);
   renderAll([...APPROVE_KINDS, "approver-status", "approver-waiting"]);
 }
 function authFlagged() {
@@ -5655,7 +5978,8 @@ var focusIdx = /* @__PURE__ */ new Map();
 var usageView = /* @__PURE__ */ new Map();
 var modelIdx = /* @__PURE__ */ new Map();
 var shownReq = /* @__PURE__ */ new Map();
-var shownRule = /* @__PURE__ */ new Map();
+var shownFaccia = /* @__PURE__ */ new Map();
+var shownLungo = /* @__PURE__ */ new Map();
 var ws = null;
 var animPhase = 0;
 var lastSessionSig = "";
@@ -5684,7 +6008,8 @@ function render(context, kind) {
   });
   if (painted) {
     shownReq.set(context, painted.reqId);
-    shownRule.set(context, painted.rule);
+    shownFaccia.set(context, painted.faccia ?? null);
+    shownLungo.set(context, !!painted.lungo);
   }
   if (image != null) setImage(context, image);
 }
@@ -6028,11 +6353,11 @@ function onKeyDown(context, kind) {
       const pool = blocked.length ? blocked : state.sessions;
       const n = pool.length;
       if (!n) return showAlert(context);
-      const poolSig = pool.map((s) => s.pid).join(",");
+      const poolSig = pool.map((s) => s.pid ?? s.sessionId).join(",");
       const prev = focusIdx.get(context);
       const i = prev?.sig === poolSig ? (prev.i + 1) % n : 0;
       focusIdx.set(context, { i, sig: poolSig });
-      act(context, platform.focusWindow(pool[i]));
+      apriRecord(context, pool[i]);
       return render(context, "focus-session");
     }
     case "quick-prompt": {
@@ -6079,7 +6404,7 @@ function onKeyDown(context, kind) {
       }
       const entry = statusEntry(resolved, cycling ? idx : null);
       render(context, "approver-status");
-      return act(context, platform.focusWindow(sessionByPid(entry.pid)));
+      return apriRecord(context, entry.url ? { url: entry.url } : sessionByPid(entry.pid));
     }
     case "approver-waiting": {
       const blocked = blockedSessions(state.sessions, Date.now(), state.activity, state.pending);
@@ -6093,14 +6418,12 @@ function onKeyDown(context, kind) {
       }, 4e3);
       cycle.set(context, cy);
       render(context, "approver-waiting");
-      return act(context, platform.focusWindow(blocked[cy.idx]));
+      return apriRecord(context, blocked[cy.idx]);
     }
     case "approve-allow":
     case "approve-always":
     case "approve-deny": {
       try {
-        if (state.hookErr) return showAlert(context);
-        const s = views.get(context)?.settings ?? {};
         const d = pressDecision({
           queue: state.approveQueue,
           shownId: shownReq.get(context) ?? null,
@@ -6112,28 +6435,12 @@ function onKeyDown(context, kind) {
           renderApproveAll();
           return showAlert(context);
         }
-        const which = kind.slice("approve-".length);
         const target = approvable(state.approveQueue);
-        const body = decisionBody(which, target, { sessionOnly: !!s.sessionOnly });
-        const ruleOk = kind !== "approve-always" || shownRule.get(context) != null && alwaysRule(target, !!s.sessionOnly) === shownRule.get(context);
-        const denied = which === "always" ? denyBlock(state.denies, target, Date.now()) : null;
-        if (!body || !ruleOk || denied) {
-          const why = denied ?? (!body ? "no single safe rule" : "rule is not what was shown");
-          log(`approve: refused ${which} for ${target.toolName} (${why})`);
-          renderApproveAll();
-          return showAlert(context);
-        }
-        const { queue, req } = resolve(state.approveQueue, d.id);
-        if (!req) {
-          renderApproveAll();
-          return showAlert(context);
-        }
-        state.approveQueue = queue;
-        req.ticket.respond(body);
-        if (which === "deny") state.denies = rememberDeny(state.denies, req, Date.now());
-        log(`approve: ${which} ${req.toolName}${which === "always" ? ` as ${shownRule.get(context)}` : ""}`);
-        state.lastHeadChangeAt = Date.now();
-        queueChanged();
+        if (state.hookErr && !target?.cloud) return showAlert(context);
+        if (isQuestion(target)) return premiDomanda(context, kind, target);
+        if (kind === "approve-always") return apriRecord(context, sessioneDi(target));
+        if (kind === "approve-allow" && shownLungo.get(context)) return iniziaPressioneLunga(context, target);
+        rispondi(target.id, decisionBody(kind === "approve-allow" ? "allow" : "deny", target), kind === "approve-allow" ? "allow" : "deny");
       } catch (e) {
         log("approve press failed:", e?.stack ?? String(e));
         showAlert(context);
@@ -6141,6 +6448,177 @@ function onKeyDown(context, kind) {
       return;
     }
   }
+}
+function rispondi(id, body, perche) {
+  const prev = approvable(state.approveQueue)?.id ?? null;
+  const { queue, req } = resolve(state.approveQueue, id);
+  if (!req) return false;
+  state.approveQueue = queue;
+  state.risposte.delete(id);
+  req.ticket.respond(body);
+  if (perche === "deny") state.denies = rememberDeny(state.denies, req, Date.now());
+  log(`approve: ${perche} ${req.toolName}${req.cloud ? " (cloud)" : ""}`);
+  noteHeadChange(prev);
+  state.lastHeadChangeAt = Date.now();
+  queueChanged();
+  return true;
+}
+function premiDomanda(context, kind, req) {
+  const st = state.risposte.get(req.id) ?? statoIniziale();
+  const f = facce(req, st)[SLOT[kind]];
+  const atteso = f ? `${st.passo}:${st.pagina}:${f.tipo}:${f.indice ?? f.verso ?? ""}` : null;
+  if (atteso !== (shownFaccia.get(context) ?? null)) {
+    renderApproveAll();
+    return showAlert(context);
+  }
+  if (f.tipo === "domanda") return apriRecord(context, sessioneDi(req));
+  const esito = premi(req, st, SLOT[kind]);
+  if (esito.risposte) return void rispondi(req.id, answerBody(req, esito.risposte), "answer");
+  state.risposte.set(req.id, esito.stato);
+  state.lastHeadChangeAt = Date.now();
+  renderApproveAll();
+}
+var LUNGO_MS = 2e3;
+var pressioni = /* @__PURE__ */ new Map();
+function iniziaPressioneLunga(context, req) {
+  annullaPressione(context);
+  const timer = setTimeout(() => {
+    pressioni.delete(context);
+    const ora = approvable(state.approveQueue);
+    if (!ora || ora.id !== req.id) return showAlert(context);
+    rispondi(req.id, decisionBody("allow", req), "allow (pressione lunga)");
+  }, LUNGO_MS);
+  pressioni.set(context, { timer, reqId: req.id });
+}
+function annullaPressione(context) {
+  const p = pressioni.get(context);
+  if (p) {
+    clearTimeout(p.timer);
+    pressioni.delete(context);
+  }
+  return !!p;
+}
+function onKeyUp(context) {
+  if (annullaPressione(context)) showAlert(context);
+}
+function sessioneDi(req) {
+  return state.sessions.filter((s) => s.sessionId === req?.sessionId).sort((a, b) => (b.statusUpdatedAt ?? 0) - (a.statusUpdatedAt ?? 0))[0] ?? null;
+}
+function apriRecord(context, rec) {
+  if (rec?.url) return act(context, platform.openUrl(rec.url));
+  if (rec?.pid) return act(context, platform.focusWindow(rec));
+  return showAlert(context);
+}
+var gestiteCloud = /* @__PURE__ */ new Map();
+var relayTimer = null;
+function relayConf() {
+  const gs = state.globalSettings ?? {};
+  return { url: String(gs.relayUrl ?? "").trim().replace(/\/+$/, ""), token: String(gs.relayToken ?? "").trim() };
+}
+function programmaRelay(ms) {
+  clearTimeout(relayTimer);
+  relayTimer = setTimeout(pollRelay, ms);
+  relayTimer.unref?.();
+}
+function togliCloud() {
+  const prima = state.approveQueue.length;
+  state.approveQueue = state.approveQueue.filter((r) => !r.cloud);
+  const cambiata = state.approveQueue.length !== prima;
+  if (cambiata) queueChanged();
+  if (state.cloudSessions.length) {
+    state.cloudSessions = [];
+    pubblicaSessioni();
+  }
+}
+async function pollRelay() {
+  const { url, token } = relayConf();
+  if (!urlValido(url) || token.length < 32) {
+    togliCloud();
+    state.relay = { ok: false, err: url || token ? "relay da configurare" : null, at: 0, errori: 0, sessioni: 0 };
+    return programmaRelay(1e4);
+  }
+  let snap;
+  try {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 8e3);
+    const r = await fetch(url + "/v1/deck", { headers: { authorization: `Bearer ${token}` }, signal: ac.signal }).finally(() => clearTimeout(t));
+    if (r.status === 401) throw new Error("chiave deck errata");
+    if (!r.ok) throw new Error(`relay HTTP ${r.status}`);
+    snap = await r.json();
+  } catch (e) {
+    const msg = String(e?.message ?? e);
+    const errori = (state.relay.errori ?? 0) + 1;
+    if (state.relay.err !== msg) log("relay:", msg);
+    state.relay = { ...state.relay, ok: false, err: msg, errori };
+    if (errori >= 3) togliCloud();
+    return programmaRelay(intervallo({ errori }));
+  }
+  if (!state.relay.ok) log("relay: collegato");
+  state.relay = { ok: true, err: null, at: Date.now(), errori: 0, sessioni: snap?.sessioni?.length ?? 0 };
+  applicaRelay(snap);
+  programmaRelay(intervallo({ snap }));
+}
+function applicaRelay(snap) {
+  const adesso = Date.now();
+  for (const [id, t] of gestiteCloud) if (adesso - t > 12e4) gestiteCloud.delete(id);
+  state.cloudSessions = sessioniCloud(snap, adesso);
+  let cambiata = false;
+  const sparite = richiesteSparite(state.approveQueue, snap);
+  if (sparite.length) {
+    const prev = approvable(state.approveQueue)?.id ?? null;
+    state.approveQueue = state.approveQueue.filter((r) => !sparite.includes(r.id));
+    noteHeadChange(prev);
+    cambiata = true;
+  }
+  if (hasApproveKey()) {
+    for (const r of richiesteNuove(state.approveQueue, snap, new Set(gestiteCloud.keys()))) {
+      const req = { id: ++approveSeq, ...voceDa(r, state.cloudSessions, adesso, snap.ora) };
+      req.ticket = ticketCloud(req);
+      const prev = approvable(state.approveQueue)?.id ?? null;
+      const { queue, evicted } = enqueue(state.approveQueue, req);
+      state.approveQueue = queue;
+      if (evicted) evicted.ticket.respond(null);
+      noteHeadChange(prev);
+      cambiata = true;
+      log(`approve: ${req.toolName} dal cloud (${path3.basename(req.cwd)})`);
+    }
+  }
+  if (cambiata) queueChanged();
+  pubblicaSessioni();
+}
+function ticketCloud(req) {
+  const ticket = {
+    id: req.id,
+    closed: false,
+    respond(out) {
+      if (ticket.closed) return false;
+      ticket.closed = true;
+      gestiteCloud.set(req.cloudId, Date.now());
+      const decisione = decisioneDa(out);
+      if (decisione) inviaDecisione(req.cloudId, decisione);
+      return true;
+    }
+  };
+  return ticket;
+}
+async function inviaDecisione(id, decisione) {
+  const { url, token } = relayConf();
+  try {
+    const r = await fetch(url + "/v1/deck/decisione", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ id, decisione })
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      log(`relay: decisione non accettata (${j.errore ?? r.status})`);
+      if (j.errore !== "GIA_DECISA") gestiteCloud.delete(id);
+    }
+  } catch (e) {
+    log("relay: decisione non inviata:", String(e?.message ?? e));
+    gestiteCloud.delete(id);
+  }
+  programmaRelay(300);
 }
 if (process.argv.includes("--selftest")) {
   (async () => {
@@ -6273,9 +6751,15 @@ if (process.argv.includes("--selftest")) {
       state.rates = state.globalSettings.rates ?? {};
       pollUsageMeter();
       ensureHookServer();
+      programmaRelay(200);
+      renderApproveAll();
     } else if (event === "sendToPlugin" && action) {
       if (msg.payload?.cmd === "getModels") {
         send({ event: "sendToPropertyInspector", context, payload: { models: (state.usage?.models ?? []).map((m) => m.name) } });
+      }
+      if (msg.payload?.cmd === "getRelay") {
+        const { ok, err, sessioni } = state.relay;
+        send({ event: "sendToPropertyInspector", context, payload: { relay: { ok, err, sessioni } } });
       }
       if (msg.payload?.cmd === "getInstall") {
         send({ event: "sendToPropertyInspector", context, payload: {
@@ -6284,6 +6768,8 @@ if (process.argv.includes("--selftest")) {
       }
     } else if (event === "keyDown" && action) {
       onKeyDown(context, kindOf(action));
+    } else if (event === "keyUp" && action) {
+      onKeyUp(context);
     }
   });
   (function usageLoop() {

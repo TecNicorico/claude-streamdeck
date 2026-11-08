@@ -13,12 +13,14 @@ import { windowStartMs, parseRequests, mergeById, aggregate, aggregateByModel, b
 import { resolveStatusKey, statusEntry, autoSlot, sessionState, blockedSessions, sessionSig, transcriptPathFor, pidLooksRecycled } from "./status.js";
 import { randomBytes } from "node:crypto";
 import {
-  decisionBody, alwaysRule, pressDecision,
+  decisionBody, answerBody, pressDecision, isQuestion,
   enqueue, approvable, approvableDepth, pendingBySession, resolve, expiredIds, staleIds, seedBaselines, hookFragment,
-  rememberDeny, denyBlock, pruneDenies,
+  rememberDeny, pruneDenies,
   PORT_DEFAULT, HOLD_S_DEFAULT, QUEUE_MAX,
 } from "./approve.js";
 import { startHookServer, BADPATH_WINDOW_MS, BADPATH_MIN_HITS } from "./hookserver.js";
+import { statoIniziale, premi, facce, SLOT } from "./domande.js";
+import { sessioniCloud, richiesteNuove, richiesteSparite, voceDa, decisioneDa, intervallo, urlValido } from "./relay.js";
 import {
   viewFor, gaugeMode, GAUGE_WINDOW, modelList, modelListIndex, sessionEta, PULSE_MS,
 } from "./view.js";
@@ -98,6 +100,13 @@ const state = {
   hookSecret: null,
   hookPort: PORT_DEFAULT,
   hookErr: null,
+  // Sessioni: quelle di questo computer (pollSessions) e quelle nel cloud (pollRelay).
+  // state.sessions è sempre la loro unione, rifatta da pubblicaSessioni().
+  localSessions: [],
+  cloudSessions: [],
+  // id richiesta -> a che punto è la risposta a una domanda (domande.js)
+  risposte: new Map(),
+  relay: { ok: false, err: null, at: 0, errori: 0, sessioni: 0 },
   lastHeadChangeAt: 0,
   globalSettings: {},
   pluginUUID: null,
@@ -324,14 +333,25 @@ async function pollSessions() {
     // Compare against the signature cached on the PREVIOUS tick. Recomputing
     // both sides with the same `now` would cancel the derived state out, so a
     // time-only transition (finished → idle at 60s) would never repaint.
-    const nextSig = sessionSig(out, Date.now(), state.activity, state.pending);
-    const changed = nextSig !== lastSessionSig;
-    lastSessionSig = nextSig;
-    state.sessions = out;
-    if (changed) renderAll(["sessions", "focus-session", "approver-status", "approver-waiting"]);
+    state.localSessions = out;
+    pubblicaSessioni();
   } catch (e) {
     log("sessions poll failed:", String(e));
   }
+}
+
+// state.sessions = sessioni locali + sessioni cloud, e ridisegna i tasti se è cambiato
+// qualcosa. Lo chiamano i due poller, ognuno col suo ritmo.
+function pubblicaSessioni() {
+  const tutte = [...state.localSessions, ...state.cloudSessions];
+  // Compare against the signature cached on the PREVIOUS tick. Recomputing
+  // both sides with the same `now` would cancel the derived state out, so a
+  // time-only transition (finished → idle at 60s) would never repaint.
+  const nextSig = sessionSig(tutte, Date.now(), state.activity, state.pending);
+  const changed = nextSig !== lastSessionSig;
+  lastSessionSig = nextSig;
+  state.sessions = tutte;
+  if (changed) renderAll(["sessions", "focus-session", "approver-status", "approver-waiting"]);
 }
 
 // ---------- approver ----------
@@ -356,6 +376,7 @@ const hasApproveKey = () => [...views.values()].some((v) => APPROVE_KINDS.includ
 // hookErr clearing, a deny block expiring.)
 function queueChanged() {
   state.pending = pendingBySession(state.approveQueue);
+  for (const id of [...state.risposte.keys()]) if (!state.approveQueue.some((r) => r.id === id)) state.risposte.delete(id);
   renderAll([...APPROVE_KINDS, "approver-status", "approver-waiting"]);
 }
 
@@ -767,7 +788,8 @@ const focusIdx = new Map(); // context -> { i, sig } (sig = the pool it indexes)
 const usageView = new Map(); // context -> "cost" | "tokens" (Usage key toggle)
 const modelIdx = new Map(); // context -> index into the model list (Model key: press to rotate)
 const shownReq = new Map();  // context -> the approve request id this key last PAINTED
-const shownRule = new Map(); // context -> the ALWAYS rule text this key last PAINTED
+const shownFaccia = new Map(); // context -> la faccia di domanda che questo tasto ha DISEGNATO
+const shownLungo = new Map();  // context -> se questo ALLOW chiedeva la pressione lunga
 let ws = null;
 let animPhase = 0;
 let lastSessionSig = ""; // previous tick's session signature (see pollSessions)
@@ -802,7 +824,8 @@ function render(context, kind) {
   });
   if (painted) {
     shownReq.set(context, painted.reqId);
-    shownRule.set(context, painted.rule);
+    shownFaccia.set(context, painted.faccia ?? null);
+    shownLungo.set(context, !!painted.lungo);
   }
   if (image != null) setImage(context, image);
 }
@@ -1174,11 +1197,11 @@ function onKeyDown(context, kind) {
       // Reset to the top when the pool changed (a session blocked/unblocked or
       // went away), so the first press always lands on the most urgent rather
       // than wherever a stale index happened to point.
-      const poolSig = pool.map((s) => s.pid).join(",");
+      const poolSig = pool.map((s) => s.pid ?? s.sessionId).join(",");
       const prev = focusIdx.get(context);
       const i = prev?.sig === poolSig ? (prev.i + 1) % n : 0;
       focusIdx.set(context, { i, sig: poolSig });
-      act(context, platform.focusWindow(pool[i]));
+      apriRecord(context, pool[i]);
       return render(context, "focus-session");
     }
     case "quick-prompt": {
@@ -1224,7 +1247,8 @@ function onKeyDown(context, kind) {
       }
       const entry = statusEntry(resolved, cycling ? idx : null);
       render(context, "approver-status");
-      return act(context, platform.focusWindow(sessionByPid(entry.pid)));
+      // Una sessione cloud non ha una finestra: si apre la sua pagina su claude.ai.
+      return apriRecord(context, entry.url ? { url: entry.url } : sessionByPid(entry.pid));
     }
     case "approver-waiting": {
       // Dedicated "who needs me" key: press focuses the front blocked session,
@@ -1237,7 +1261,7 @@ function onKeyDown(context, kind) {
       cy.timer = setTimeout(() => { cycle.set(context, { idx: -1, timer: null }); render(context, "approver-waiting"); }, 4000);
       cycle.set(context, cy);
       render(context, "approver-waiting");
-      return act(context, platform.focusWindow(blocked[cy.idx]));
+      return apriRecord(context, blocked[cy.idx]);
     }
     case "approve-allow":
     case "approve-always":
@@ -1245,8 +1269,6 @@ function onKeyDown(context, kind) {
       // Wrapped: a double-resolve throws ERR_HTTP_HEADERS_SENT synchronously, and
       // onKeyDown runs bare off the websocket handler - an escape kills every key.
       try {
-        if (state.hookErr) return showAlert(context);
-        const s = views.get(context)?.settings ?? {};
         const d = pressDecision({
           queue: state.approveQueue,
           shownId: shownReq.get(context) ?? null,
@@ -1255,37 +1277,16 @@ function onKeyDown(context, kind) {
         });
         if (d.action === "none") return;
         if (d.action === "alert") { renderApproveAll(); return showAlert(context); }
-
-        const which = kind.slice("approve-".length); // allow | always | deny
-        // Decide BEFORE resolving: a refusal must not consume the request, or
-        // fat-fingering the greyed ALWAYS key would wipe it off ALLOW and DENY too.
         const target = approvable(state.approveQueue);
-        const body = decisionBody(which, target, { sessionOnly: !!s.sessionOnly });
-        // Compare the rule against what this key actually PAINTED (shownRule), not
-        // against a value re-derived from the same object - that would be `x === x`.
-        const ruleOk = kind !== "approve-always"
-          || (shownRule.get(context) != null && alwaysRule(target, !!s.sessionOnly) === shownRule.get(context));
-        // Same call as the renderer's, so a key that painted "just denied" is exactly
-        // the key that refuses. Checked here rather than folded into decisionBody
-        // because the block is time-based state, and approve.js stays pure.
-        const denied = which === "always" ? denyBlock(state.denies, target, Date.now()) : null;
-        if (!body || !ruleOk || denied) {
-          const why = denied ?? (!body ? "no single safe rule" : "rule is not what was shown");
-          log(`approve: refused ${which} for ${target.toolName} (${why})`);
-          renderApproveAll();
-          return showAlert(context);
-        }
+        // Il server dell'hook locale non c'è: le richieste locali non possono arrivare,
+        // ma quelle del cloud sì, e a quelle si risponde lo stesso.
+        if (state.hookErr && !target?.cloud) return showAlert(context);
 
-        const { queue, req } = resolve(state.approveQueue, d.id);
-        if (!req) { renderApproveAll(); return showAlert(context); }
-        state.approveQueue = queue;
-        req.ticket.respond(body);
-        // Remember the deny BEFORE the retry arrives (~1.8s on-device), so the retry is
-        // already blocked by the time it paints.
-        if (which === "deny") state.denies = rememberDeny(state.denies, req, Date.now());
-        log(`approve: ${which} ${req.toolName}${which === "always" ? ` as ${shownRule.get(context)}` : ""}`);
-        state.lastHeadChangeAt = Date.now();
-        queueChanged();
+        if (isQuestion(target)) return premiDomanda(context, kind, target);
+        // Il tasto centrale con un permesso: porta alla sessione, non decide niente.
+        if (kind === "approve-always") return apriRecord(context, sessioneDi(target));
+        if (kind === "approve-allow" && shownLungo.get(context)) return iniziaPressioneLunga(context, target);
+        rispondi(target.id, decisionBody(kind === "approve-allow" ? "allow" : "deny", target), kind === "approve-allow" ? "allow" : "deny");
       } catch (e) {
         log("approve press failed:", e?.stack ?? String(e));
         showAlert(context);
@@ -1293,6 +1294,200 @@ function onKeyDown(context, kind) {
       return;
     }
   }
+}
+
+// Chiude una richiesta con una risposta e ridisegna. Unica strada per rispondere,
+// locale o cloud: il ticket sa dove mandare la risposta.
+function rispondi(id, body, perche) {
+  const prev = approvable(state.approveQueue)?.id ?? null;
+  const { queue, req } = resolve(state.approveQueue, id);
+  if (!req) return false;
+  state.approveQueue = queue;
+  state.risposte.delete(id);
+  req.ticket.respond(body);
+  // Remember the deny BEFORE the retry arrives (~1.8s on-device), so the retry is
+  // already blocked by the time it paints.
+  if (perche === "deny") state.denies = rememberDeny(state.denies, req, Date.now());
+  log(`approve: ${perche} ${req.toolName}${req.cloud ? " (cloud)" : ""}`);
+  noteHeadChange(prev);
+  state.lastHeadChangeAt = Date.now();
+  queueChanged();
+  return true;
+}
+
+// Una pressione su una faccia di domanda. La faccia premuta deve essere quella che il
+// tasto aveva disegnato: se nel frattempo la domanda è andata avanti, niente.
+function premiDomanda(context, kind, req) {
+  const st = state.risposte.get(req.id) ?? statoIniziale();
+  const f = facce(req, st)[SLOT[kind]];
+  const atteso = f ? `${st.passo}:${st.pagina}:${f.tipo}:${f.indice ?? f.verso ?? ""}` : null;
+  if (atteso !== (shownFaccia.get(context) ?? null)) { renderApproveAll(); return showAlert(context); }
+  if (f.tipo === "domanda") return apriRecord(context, sessioneDi(req));
+  const esito = premi(req, st, SLOT[kind]);
+  if (esito.risposte) return void rispondi(req.id, answerBody(req, esito.risposte), "answer");
+  state.risposte.set(req.id, esito.stato);
+  // Come un cambio di richiesta: un doppio tocco non risponde alla domanda dopo.
+  state.lastHeadChangeAt = Date.now();
+  renderApproveAll();
+}
+
+// ---------- pressione lunga (scritture in produzione) ----------
+const LUNGO_MS = 2_000;
+const pressioni = new Map(); // context -> { timer, reqId }
+function iniziaPressioneLunga(context, req) {
+  annullaPressione(context);
+  const timer = setTimeout(() => {
+    pressioni.delete(context);
+    const ora = approvable(state.approveQueue);
+    if (!ora || ora.id !== req.id) return showAlert(context);
+    rispondi(req.id, decisionBody("allow", req), "allow (pressione lunga)");
+  }, LUNGO_MS);
+  pressioni.set(context, { timer, reqId: req.id });
+}
+function annullaPressione(context) {
+  const p = pressioni.get(context);
+  if (p) { clearTimeout(p.timer); pressioni.delete(context); }
+  return !!p;
+}
+// Lasciato prima dei due secondi: non approva, e lo dice.
+function onKeyUp(context) {
+  if (annullaPressione(context)) showAlert(context);
+}
+
+// ---------- aprire una sessione: la sua finestra, o la sua pagina su claude.ai ----------
+function sessioneDi(req) {
+  return state.sessions.filter((s) => s.sessionId === req?.sessionId)
+    .sort((a, b) => (b.statusUpdatedAt ?? 0) - (a.statusUpdatedAt ?? 0))[0] ?? null;
+}
+function apriRecord(context, rec) {
+  if (rec?.url) return act(context, platform.openUrl(rec.url));
+  if (rec?.pid) return act(context, platform.focusWindow(rec));
+  return showAlert(context);
+}
+
+// ---------- relay: le sessioni Claude Code nel cloud ----------
+// Legge la bacheca del relay (relay/ nella radice del repository), trasforma le sessioni
+// cloud in sessioni come le altre e mette le loro richieste nella fila. Senza relay
+// configurato non fa niente e non costa niente.
+const gestiteCloud = new Map(); // id richiesta del relay -> quando il deck l'ha chiusa
+let relayTimer = null;
+
+function relayConf() {
+  const gs = state.globalSettings ?? {};
+  return { url: String(gs.relayUrl ?? "").trim().replace(/\/+$/, ""), token: String(gs.relayToken ?? "").trim() };
+}
+function programmaRelay(ms) {
+  clearTimeout(relayTimer);
+  relayTimer = setTimeout(pollRelay, ms);
+  relayTimer.unref?.();
+}
+function togliCloud() {
+  const prima = state.approveQueue.length;
+  state.approveQueue = state.approveQueue.filter((r) => !r.cloud);
+  const cambiata = state.approveQueue.length !== prima;
+  if (cambiata) queueChanged();
+  if (state.cloudSessions.length) { state.cloudSessions = []; pubblicaSessioni(); }
+}
+
+async function pollRelay() {
+  const { url, token } = relayConf();
+  if (!urlValido(url) || token.length < 32) {
+    togliCloud();
+    state.relay = { ok: false, err: url || token ? "relay da configurare" : null, at: 0, errori: 0, sessioni: 0 };
+    return programmaRelay(10_000);
+  }
+  let snap;
+  try {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 8_000);
+    const r = await fetch(url + "/v1/deck", { headers: { authorization: `Bearer ${token}` }, signal: ac.signal }).finally(() => clearTimeout(t));
+    if (r.status === 401) throw new Error("chiave deck errata");
+    if (!r.ok) throw new Error(`relay HTTP ${r.status}`);
+    snap = await r.json();
+  } catch (e) {
+    const msg = String(e?.message ?? e);
+    const errori = (state.relay.errori ?? 0) + 1;
+    if (state.relay.err !== msg) log("relay:", msg);
+    state.relay = { ...state.relay, ok: false, err: msg, errori };
+    // Dopo qualche errore le sessioni cloud non si mostrano più: meglio nessuna notizia
+    // che una sessione «al lavoro» ferma da chissà quando.
+    if (errori >= 3) togliCloud();
+    return programmaRelay(intervallo({ errori }));
+  }
+  if (!state.relay.ok) log("relay: collegato");
+  state.relay = { ok: true, err: null, at: Date.now(), errori: 0, sessioni: snap?.sessioni?.length ?? 0 };
+  applicaRelay(snap);
+  programmaRelay(intervallo({ snap }));
+}
+
+function applicaRelay(snap) {
+  const adesso = Date.now();
+  for (const [id, t] of gestiteCloud) if (adesso - t > 120_000) gestiteCloud.delete(id);
+  state.cloudSessions = sessioniCloud(snap, adesso);
+  let cambiata = false;
+  const sparite = richiesteSparite(state.approveQueue, snap);
+  if (sparite.length) {
+    const prev = approvable(state.approveQueue)?.id ?? null;
+    state.approveQueue = state.approveQueue.filter((r) => !sparite.includes(r.id));
+    noteHeadChange(prev);
+    cambiata = true;
+  }
+  // Senza un tasto di approvazione visibile le richieste restano a claude.ai.
+  if (hasApproveKey()) {
+    for (const r of richiesteNuove(state.approveQueue, snap, new Set(gestiteCloud.keys()))) {
+      const req = { id: ++approveSeq, ...voceDa(r, state.cloudSessions, adesso, snap.ora) };
+      req.ticket = ticketCloud(req);
+      const prev = approvable(state.approveQueue)?.id ?? null;
+      const { queue, evicted } = enqueue(state.approveQueue, req);
+      state.approveQueue = queue;
+      if (evicted) evicted.ticket.respond(null);
+      noteHeadChange(prev);
+      cambiata = true;
+      log(`approve: ${req.toolName} dal cloud (${path.basename(req.cwd)})`);
+    }
+  }
+  if (cambiata) queueChanged();
+  pubblicaSessioni();
+}
+
+// Il ticket di una richiesta cloud: traduce la risposta per Claude Code in una decisione
+// per il relay. Una risposta nulla (tempo scaduto, tasto sparito) non manda niente: la
+// richiesta resta a claude.ai, e la fila non la riprende più.
+function ticketCloud(req) {
+  const ticket = {
+    id: req.id,
+    closed: false,
+    respond(out) {
+      if (ticket.closed) return false;
+      ticket.closed = true;
+      gestiteCloud.set(req.cloudId, Date.now());
+      const decisione = decisioneDa(out);
+      if (decisione) inviaDecisione(req.cloudId, decisione);
+      return true;
+    },
+  };
+  return ticket;
+}
+
+async function inviaDecisione(id, decisione) {
+  const { url, token } = relayConf();
+  try {
+    const r = await fetch(url + "/v1/deck/decisione", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ id, decisione }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      log(`relay: decisione non accettata (${j.errore ?? r.status})`);
+      // Torna in fila alla prossima lettura, se il relay la elenca ancora.
+      if (j.errore !== "GIA_DECISA") gestiteCloud.delete(id);
+    }
+  } catch (e) {
+    log("relay: decisione non inviata:", String(e?.message ?? e));
+    gestiteCloud.delete(id);
+  }
+  programmaRelay(300);
 }
 
 // ---------- selftest mode (no Stream Deck needed) ----------
@@ -1412,9 +1607,15 @@ if (process.argv.includes("--selftest")) {
       state.rates = state.globalSettings.rates ?? {};
       pollUsageMeter();
       ensureHookServer();
+      programmaRelay(200);
+      renderApproveAll();
     } else if (event === "sendToPlugin" && action) {
       if (msg.payload?.cmd === "getModels") {
         send({ event: "sendToPropertyInspector", context, payload: { models: (state.usage?.models ?? []).map((m) => m.name) } });
+      }
+      if (msg.payload?.cmd === "getRelay") {
+        const { ok, err, sessioni } = state.relay;
+        send({ event: "sendToPropertyInspector", context, payload: { relay: { ok, err, sessioni } } });
       }
       if (msg.payload?.cmd === "getInstall") {
         send({ event: "sendToPropertyInspector", context, payload: {
@@ -1423,6 +1624,8 @@ if (process.argv.includes("--selftest")) {
       }
     } else if (event === "keyDown" && action) {
       onKeyDown(context, kindOf(action));
+    } else if (event === "keyUp" && action) {
+      onKeyUp(context);
     }
   });
 

@@ -422,7 +422,11 @@ function approveKey(kind, req, o = {}) {
   if (o.err) return shell(C.bad, 1, [], o.err);
   if (!req) return shell(C.dim, 0.4, [], "all clear");
 
-  const { name, target } = describeRequest(req);
+  const d = describeRequest(req);
+  // Una richiesta del cloud lo dice in fondo, accanto al progetto: in alto a destra
+  // si scontrerebbe col titolo.
+  const name = req.cloud ? `${d.name} · cloud` : d.name;
+  const target = o.target || d.target;
   const rule = kind === "approve-always" ? alwaysRule(req, !!o.sessionOnly) : null;
   // o.denied is set when this target's rule was DENIED in the last DENY_WINDOW_MS. The
   // rule still renders, greyed: the user needs to see WHAT is blocked, and hiding it
@@ -439,6 +443,12 @@ function approveKey(kind, req, o = {}) {
     ? (denied ? "ALWAYS" : rule === null ? "ALWAYS n/a" : `ALWAYS ·${o.sessionOnly ? "ses" : "prj"}`)
     : look.word;
 
+  // Una scrittura in produzione: il tasto ALLOW chiede la pressione lunga e lo dice
+  // in ambra, con il progetto e cosa fa sotto al comando.
+  if (kind === "approve-allow" && o.lungo) {
+    return shell(C.warn, 1, [{ t: target, max: 22 }, { t: o.dettaglio || "tieni premuto", col: C.warn, max: 16 }], "tieni premuto 2 s", cornerSvg, "ALLOW 2s");
+  }
+
   if (denied) {
     return shell(col, mult, ruleLines(rule).map((t) => ({ t, col: C.dim, max: 18 })), String(o.denied), cornerSvg, word);
   }
@@ -449,8 +459,93 @@ function approveKey(kind, req, o = {}) {
   return shell(col, mult, lines, name, cornerSvg, word);
 }
 
+// ================= DOMANDE E INFO — la riga in basso quando cambia faccia ==========
+// Spezza un testo in al più `righe` righe di `max` caratteri, a parole; l'ultima riga
+// finisce con "…" se il testo non ci sta. line() resta il paracadute contro l'overflow.
+function aCapo(testo, max, righe) {
+  const parole = String(testo ?? "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  const out = [];
+  let cur = "";
+  for (let i = 0; i < parole.length; i++) {
+    const p = parole[i];
+    const prova = cur ? cur + " " + p : p;
+    if (prova.length <= max) { cur = prova; continue; }
+    if (cur) out.push(cur);
+    cur = p.length > max ? p.slice(0, max - 1) + "…" : p;
+    if (out.length === righe) { cur = ""; break; }
+  }
+  if (cur && out.length < righe) out.push(cur);
+  const usato = out.join(" ").replace(/…/g, "").length;
+  const totale = parole.join(" ").length;
+  if (out.length && usato < totale && !out[out.length - 1].endsWith("…")) {
+    const u = out[out.length - 1];
+    out[out.length - 1] = (u.length >= max ? u.slice(0, max - 1) : u) + "…";
+  }
+  return out.length ? out : ["—"];
+}
+
+const CORPO = [[92, 0], [78, 26], [68, 22], [62, 18]];
+const corpo = (righe, ideale, col = C.text) => {
+  const n = Math.min(4, righe.length);
+  const [top, step] = CORPO[n - 1] ?? CORPO[0];
+  const size = n === 1 ? ideale : n === 2 ? Math.min(ideale, 20) : n === 3 ? Math.min(ideale, 18) : 15;
+  return righe.slice(0, n).map((t, i) => line(72, top + i * step, 130, size, 700, col, t)).join("");
+};
+
+// Un'opzione di una domanda di Claude. La pressione risponde con QUESTA opzione: è
+// un'azione, quindi banda, nel viola di "input needed". Al posto del glifo il numero
+// dell'opzione, lo stesso che Claude mostra nella sua lista: un badge a destra
+// coprirebbe la fine dell'intestazione.
+function opzioneKey(numero, intestazione, label, sub, phase = null) {
+  const col = C.ask;
+  return svgWrap(`
+    ${tintFrame(col, true, phase)}
+    ${band.rule(col)}
+    <circle cx="21" cy="19" r="11.5" fill="${C.panel}" stroke="${col}" stroke-width="1.5"/>
+    ${txt(21, 24.5, 14, 700, C.text, numero)}
+    ${line(40, 25, 94, 16, 800, col, String(intestazione || "domanda").toUpperCase(), "start", ' letter-spacing="0.5"')}
+    ${corpo(aCapo(label, 12, 3), 22)}
+    ${foot(sub)}`);
+}
+
+// Il tasto centrale con 4 opzioni: fa vedere le altre due.
+function paginaKey(testo, sub) {
+  const col = C.ask;
+  return svgWrap(`
+    ${tintFrame(col, false)}
+    ${band.rule(col, 0.5)}
+    ${actionHead("list", "opzioni", C.dim)}
+    ${line(72, 88, 128, 24, 700, C.text, testo)}
+    ${foot(sub)}`);
+}
+
+// Il tasto centrale con 2 opzioni: il testo della domanda. La pressione apre la sessione.
+function domandaKey(intestazione, testo, sub) {
+  return svgWrap(`
+    ${tintFrame(C.ask, false)}
+    ${band.cap(C.ident.focus)}
+    ${actionHead("focus", intestazione || "domanda", C.ident.focus)}
+    ${corpo(aCapo(testo, 15, 4), 16, C.text)}
+    ${foot(sub)}`);
+}
+
+// Il tasto centrale con un permesso: che cosa si sta per approvare, in grande. Rosso
+// per una scrittura in produzione, ambra su staging, blu per una lettura. La pressione
+// apre la sessione (su claude.ai se è nel cloud).
+const INFO_TINTA = { prod: C.bad, staging: C.warn, legge: C.info };
+function infoKey(intestazione, righe, sub, tinta = null) {
+  const col = tinta ? INFO_TINTA[tinta] ?? null : null;
+  return svgWrap(`
+    ${tintFrame(col, tinta === "prod")}
+    ${band.cap(C.ident.focus)}
+    ${actionHead("focus", intestazione, C.ident.focus)}
+    ${corpo(righe, 21)}
+    ${foot(sub)}`);
+}
+
 export {
   C, pctColor, esc, tintFrame, svgWrap, fit, fits, txt, glyph, iconSvg, listIconSvg, ruleLines,
   gaugeKey, linesKey, bigCountKey, burnKey, usageMeterKey, labelKey, actionKey,
   STATUS_LOOK, statusKey, APPROVE_LOOK, approveKey, fmtNum,
+  aCapo, opzioneKey, paginaKey, domandaKey, infoKey,
 };

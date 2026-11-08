@@ -1,5 +1,6 @@
 // Pure decision logic for the physical approver. No I/O: every function is a
 // fixture-testable transform. See docs/superpowers/specs/2026-07-25-approver-design.md §4.1.
+import { domandaRispondibile } from "./domande.js";
 
 export const DENY_MESSAGE = "Denied from Stream Deck";
 export const PORT_DEFAULT = 45623;
@@ -57,6 +58,14 @@ export function decisionBody(kind, req, opts = {}) {
   // rendered "ALWAYS n/a" persist several rules.
   if (!entry) return null;
   return wrap({ behavior: "allow", updatedPermissions: [entry] });
+}
+
+// La risposta a una domanda di Claude: l'input originale con le risposte scelte, che è
+// la forma in cui Claude Code le riceve dal suo stesso dialogo (verificato nel cloud
+// l'08/11/2026: la sessione ha ricevuto la risposta, `reason_type: hook`).
+export function answerBody(req, answers) {
+  const input = req?.toolInput && typeof req.toolInput === "object" ? req.toolInput : {};
+  return wrap({ behavior: "allow", updatedInput: { ...input, answers } });
 }
 
 export const NAME_MAX = 11;    // matches the existing statusKey name limit
@@ -159,15 +168,17 @@ export function denyBlock(denies, req, now) {
 export const QUESTION_TOOLS = new Set(["AskUserQuestion"]);
 export const isQuestion = (req) => QUESTION_TOOLS.has(String(req?.toolName ?? ""));
 
-// The request the approve keys may paint and answer: the first NON-question in the
-// queue. Deliberately not `head`, so a real permission prompt sitting BEHIND a question
-// stays reachable instead of being hidden for the whole hold window. Paint and press
-// both go through here, so a press can never answer something the keys did not show.
-export const approvable = (queue) => (queue ?? []).find((r) => !isQuestion(r)) ?? null;
+// The request the approve keys may paint and answer: the first permission prompt OR
+// the first question the deck can answer (single choice, 2-4 options: see domande.js).
+// A question the deck cannot answer (multi-select) is still skipped, so a real prompt
+// sitting BEHIND it stays reachable; it keeps feeding the WAITING key instead. Paint and
+// press both go through here, so a press can never answer something the keys did not show.
+export const answerable = (r) => !isQuestion(r) || domandaRispondibile(r);
+export const approvable = (queue) => (queue ?? []).find(answerable) ?? null;
 
 // Depth badge: what the keys can act on, not the raw queue length — a badge counting
 // requests no key can reach would just be wrong.
-export const approvableDepth = (queue) => (queue ?? []).filter((r) => !isQuestion(r)).length;
+export const approvableDepth = (queue) => (queue ?? []).filter(answerable).length;
 
 // Which sessions are blocked on the human, keyed by sessionId, derived purely from the
 // queue. This is the ONLY evidence claude-deck gets for a VS Code session: that
@@ -193,7 +204,9 @@ export function pendingBySession(queue) {
 }
 
 export const QUEUE_MAX = 8;
-export const HOLD_S_DEFAULT = 20;
+// 60 s e non 20: una domanda si legge e si sceglie, e il terminale resta comunque
+// rispondibile per tutto il tempo (vince la prima risposta).
+export const HOLD_S_DEFAULT = 60;
 export const YOUNG_MS = 10_000;
 
 export function enqueue(queue, req) {
@@ -233,8 +246,10 @@ export function resolve(queue, id) {
   return { queue: req ? queue.filter((r) => r.id !== id) : queue, req };
 }
 
+// A cloud request carries its own hold (the relay's deadline): its hook, not this
+// plugin, decides how long the session waits.
 export const expiredIds = (queue, now, holdMs) =>
-  queue.filter((r) => now - r.receivedAt > holdMs).map((r) => r.id);
+  queue.filter((r) => now - r.receivedAt > (r.holdMs ?? holdMs)).map((r) => r.id);
 
 // Record each new request's baseline from the first poll that OBSERVES it. Snapshotting
 // at enqueue would capture a <=5s-stale cache that predates the status flip which
@@ -263,6 +278,9 @@ export function seedBaselines(queue, sessions, activity) {
 export function staleIds(queue, sessions, activity, now) {
   const out = [];
   for (const r of queue) {
+    // A cloud request is dropped when the relay stops listing it, never by guessing from
+    // the session's status: the relay itself flips that status when the request opens.
+    if (r.cloud) continue;
     if (!r.baselined) continue; // no observed baseline yet -> nothing to compare against
     if (now - r.receivedAt < YOUNG_MS) continue;
     const matches = (sessions ?? []).filter((s) => s.sessionId === r.sessionId);

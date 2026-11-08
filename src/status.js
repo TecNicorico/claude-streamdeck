@@ -26,6 +26,7 @@ export const ACTIVITY_MS = 60_000;
 export function sessionWhere(s) {
   const e = String(s?.entrypoint ?? "");
   if (e === "cli") return "cli";
+  if (e === "cloud") return "cloud";
   if (e.includes("vscode")) return "code";
   return "";
 }
@@ -235,6 +236,8 @@ export function resolveStatusKey(sessions, project, autoIdx = 0, now = Date.now(
         cwd: s.cwd ?? "",
         sessionId: s.sessionId ?? null,
         pid: s.pid ?? null,
+        // Il link su claude.ai di una sessione cloud: la pressione apre quello.
+        url: s.url ?? null,
         where: sessionWhere(s),
       };
     });
@@ -249,6 +252,6 @@ export function resolveStatusKey(sessions, project, autoIdx = 0, now = Date.now(
 // "none" placeholder when nothing is bound.
 export function statusEntry(resolved, cycleIdx = null) {
   const i = cycleIdx != null ? cycleIdx : resolved.index;
-  return resolved.list[i] ?? { name: "", state: "none", waitingFor: "", statusAge: 0, waitingSince: null, cwd: "", sessionId: null, pid: null, where: "" };
+  return resolved.list[i] ?? { name: "", state: "none", waitingFor: "", statusAge: 0, waitingSince: null, cwd: "", sessionId: null, pid: null, url: null, where: "" };
 }
 

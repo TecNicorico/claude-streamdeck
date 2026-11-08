@@ -331,12 +331,13 @@ test("painted reqId is null when the queue is empty, so a press has nothing to a
   assert.equal(painted.reqId, null);
 });
 
-test("only the ALWAYS key paints a rule", () => {
+test("nessun tasto disegna più una regola permanente: il centro è un tasto info", () => {
   const state = { ...emptyState(), approveQueue: [req()] };
-  assert.equal(viewFor("approve-allow", { state, now: NOW }).painted.rule, null);
-  assert.equal(viewFor("approve-deny", { state, now: NOW }).painted.rule, null);
-  // The rule for a Bash command comes from approve.js; assert only that one exists.
-  assert.notEqual(viewFor("approve-always", { state, now: NOW }).painted.rule, undefined);
+  for (const kind of ["approve-allow", "approve-always", "approve-deny"]) {
+    assert.equal(viewFor(kind, { state, now: NOW }).painted.rule, null, kind);
+  }
+  assert.doesNotMatch(drawn("approve-always", { state }), /ALWAYS/);
+  assert.match(drawn("approve-always", { state }), /npm test/);
 });
 
 test("approve keys show a bind error over anything else", () => {
@@ -449,4 +450,61 @@ test("a pending permission prompt reads as needs-approval, not 'working'", () =>
   assert.match(drawn("approver-waiting", { state }), /permission/);
   // the Sessions key counts it as blocked rather than busy
   assert.doesNotMatch(drawn("sessions", { state }), /1 busy/);
+});
+
+// ---------- la riga in basso: Supabase, pressione lunga, domande, cloud ----------
+const CONF_GS = { supabaseProd: "prodref1234567890abc", supabaseStaging: "stagref1234567890abc" };
+const sqlReq = (query, project_id = "prodref1234567890abc", over = {}) =>
+  req({ id: 21, toolName: "mcp__Supabase__execute_sql", toolInput: { project_id, query }, cwd: "/home/user/thecore-v2", ...over });
+
+test("una scrittura in produzione: ALLOW chiede la pressione lunga e lo registra", () => {
+  const state = { ...emptyState(), globalSettings: CONF_GS, approveQueue: [sqlReq("delete from t")] };
+  const allow = viewFor("approve-allow", { state, now: NOW });
+  assert.equal(allow.painted.lungo, true);
+  assert.match(text(allow.image), /ALLOW 2S/);
+  assert.match(text(allow.image), /SQL DELETE/);
+  assert.match(text(allow.image), /PROD · scrive/);
+  assert.equal(viewFor("approve-deny", { state, now: NOW }).painted.lungo, false, "DENY non chiede mai di aspettare");
+  const info = drawn("approve-always", { state });
+  assert.match(info, /SUPABASE/);
+  assert.match(info, /execute_sql/);
+});
+
+test("una lettura in produzione, o una scrittura su staging: un tocco", () => {
+  for (const r of [sqlReq("select 1"), sqlReq("delete from t", "stagref1234567890abc")]) {
+    const state = { ...emptyState(), globalSettings: CONF_GS, approveQueue: [r] };
+    assert.equal(viewFor("approve-allow", { state, now: NOW }).painted.lungo, false, r.toolInput.query);
+  }
+});
+
+const domandaReq = (n = 2, over = {}) => req({
+  id: 31, toolName: "AskUserQuestion", sessionId: "cloud:cse_1", cwd: "/home/user/thecore-v2",
+  toolInput: { questions: [{ question: "Procedo?", header: "Conferma", multiSelect: false, options: ["Sì", "No", "Forse", "Dopo"].slice(0, n).map((label) => ({ label })) }] },
+  ...over,
+});
+
+test("una domanda a cui il deck sa rispondere cambia la faccia dei tre tasti", () => {
+  const state = { ...emptyState(), approveQueue: [domandaReq(2)] };
+  assert.match(drawn("approve-deny", { state }), /Sì/);
+  assert.match(drawn("approve-allow", { state }), /No/);
+  assert.match(drawn("approve-always", { state }), /Procedo\?/);
+  assert.match(drawn("approve-deny", { state }), /CONFERMA/);
+  assert.equal(viewFor("approve-deny", { state, now: NOW }).painted.faccia, "0:0:opzione:0");
+  assert.equal(viewFor("approve-allow", { state, now: NOW }).painted.faccia, "0:0:opzione:1");
+});
+
+test("con 4 opzioni il centro fa vedere le altre, e la faccia disegnata lo ricorda", () => {
+  const r = domandaReq(4);
+  const state = { ...emptyState(), approveQueue: [r], risposte: new Map([[r.id, { passo: 0, pagina: 1, risposte: {} }]]) };
+  assert.match(drawn("approve-deny", { state }), /Forse/);
+  assert.match(drawn("approve-allow", { state }), /Dopo/);
+  assert.match(drawn("approve-always", { state }), /◂ altre/);
+  assert.equal(viewFor("approve-always", { state, now: NOW }).painted.faccia, "0:1:pagina:0");
+});
+
+test("una richiesta del cloud si riconosce, e un guasto dell'hook locale non la copre", () => {
+  const state = { ...emptyState(), hookErr: "port busy", approveQueue: [req({ cloud: true })] };
+  const t = drawn("approve-allow", { state });
+  assert.match(t, /cloud/);
+  assert.doesNotMatch(t, /port busy/);
 });

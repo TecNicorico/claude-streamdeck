@@ -1,5 +1,7 @@
 # Agent Vitals — a Stream Deck plugin for Claude Code
 
+> **Questa versione (fork TecNicorico):** sessioni Claude Code nel cloud, risposte alle domande dai tasti, richieste Supabase con PROD/STAGING e pressione lunga per le scritture in produzione. Installazione e configurazione in italiano: [DECK-REMOTO.md](DECK-REMOTO.md).
+
 [![CI](https://github.com/tapparello/agent-vitals/actions/workflows/ci.yml/badge.svg)](https://github.com/tapparello/agent-vitals/actions/workflows/ci.yml)
 
 Live Claude usage gauges, running Claude Code sessions, per-session status, and quick-launch keys for the Elgato Stream Deck (Windows and macOS).

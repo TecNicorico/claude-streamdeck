@@ -6,7 +6,7 @@
   body { background: #2d2d2d; color: #d8d8d8; font-family: -apple-system, "Segoe UI", system-ui, sans-serif; font-size: 13px; margin: 0; padding: 10px; }
   .item { margin-bottom: 10px; }
   label { display: block; margin-bottom: 4px; color: #969696; }
-  input[type=text], textarea, select { width: 100%; box-sizing: border-box; background: #3d3d3d; border: 1px solid #555; color: #eee; border-radius: 4px; padding: 6px; font-size: 13px; }
+  input[type=text], input[type=password], textarea, select { width: 100%; box-sizing: border-box; background: #3d3d3d; border: 1px solid #555; color: #eee; border-radius: 4px; padding: 6px; font-size: 13px; }
   input[type=number] { width: 100%; box-sizing: border-box; background: #3d3d3d; border: 1px solid #555; color: #eee; border-radius: 4px; padding: 6px; font-size: 13px; }
   .rateshead { color: #969696; margin: 12px 0 4px; font-weight: 600; }
   .raterow { display: grid; grid-template-columns: 64px 1fr 1fr; gap: 6px; align-items: center; margin-bottom: 6px; }
@@ -65,8 +65,6 @@ const FIELDS = {
     INSTALL_FIELD,
   ],
   "dev.tapparello.agent-vitals.approve-always": [
-    { key: "label", type: "text", label: "Button label (optional)" },
-    { key: "sessionOnly", type: "checkbox", label: "Remember for this session only (do not write project settings)" },
     INSTALL_FIELD,
   ],
   "dev.tapparello.agent-vitals.approve-deny": [
@@ -172,7 +170,46 @@ function build() {
     form.append(div);
   }
   if (action === "dev.tapparello.agent-vitals.usage-meter") buildRates();
+  if (RELAY_ACTIONS.includes(action)) buildRelay();
 }
+// Relay e Supabase: impostazioni condivise da tutti i tasti (global settings), come le
+// tariffe del tasto Usage. La chiave è quella del DECK, mai quella del cloud.
+const RELAY_ACTIONS = ["approve-allow", "approve-always", "approve-deny", "approver-status", "approver-waiting"].map((k) => "dev.tapparello.agent-vitals." + k);
+const RELAY_FIELDS = [
+  { key: "relayUrl", label: "Relay per le sessioni cloud (https://…workers.dev)", type: "text" },
+  { key: "relayToken", label: "Chiave DECK del relay", type: "password" },
+  { key: "supabaseProd", label: "Progetti Supabase di PRODUZIONE (riferimenti, separati da virgole)", type: "text" },
+  { key: "supabaseStaging", label: "Progetti Supabase di STAGING", type: "text" },
+];
+let relayInfo = null;
+function buildRelay() {
+  let box = document.getElementById("relay");
+  if (!box) { box = document.createElement("div"); box.id = "relay"; document.getElementById("form").append(box); }
+  box.innerHTML = "";
+  const h = document.createElement("div"); h.className = "rateshead"; h.textContent = "Sessioni cloud e Supabase — condivise"; box.append(h);
+  for (const f of RELAY_FIELDS) {
+    const div = document.createElement("div"); div.className = "item";
+    const l = document.createElement("label"); l.textContent = f.label;
+    const i = document.createElement("input"); i.type = f.type; i.autocomplete = "off"; i.spellcheck = false;
+    i.value = gs[f.key] ?? "";
+    i.onchange = () => {
+      if (!gsReady) return;
+      const v = i.value.trim();
+      if (v) gs[f.key] = v; else delete gs[f.key];
+      ws.send(JSON.stringify({ event: "setGlobalSettings", context: piUuid, payload: gs }));
+      setTimeout(askRelay, 1500);
+    };
+    div.append(l, i);
+    box.append(div);
+  }
+  const st = document.createElement("div"); st.className = "cap"; st.id = "relayState";
+  st.textContent = !relayInfo ? "" : relayInfo.ok ? `Collegato · ${relayInfo.sessioni} sessioni cloud` : relayInfo.err ? `Non collegato: ${relayInfo.err}` : "Relay non configurato: solo le sessioni di questo computer.";
+  box.append(st);
+  const cap = document.createElement("div"); cap.className = "cap";
+  cap.textContent = "Una scrittura su un progetto che non è fra quelli di staging chiede di tenere premuto ALLOW per due secondi.";
+  box.append(cap);
+}
+function askRelay() { ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd: "getRelay" } })); }
 function buildRates() {
   let box = document.getElementById("rates");
   if (!box) { box = document.createElement("div"); box.id = "rates"; document.getElementById("form").append(box); }
@@ -216,9 +253,10 @@ function connectElgatoStreamDeckSocket(port, uuid, evt, info, actionInfo) {
     if (action === "dev.tapparello.agent-vitals.usage-model") {
       ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd: "getModels" } }));
     }
-    if (action === "dev.tapparello.agent-vitals.usage-meter") {
+    if (action === "dev.tapparello.agent-vitals.usage-meter" || RELAY_ACTIONS.includes(action)) {
       ws.send(JSON.stringify({ event: "getGlobalSettings", context: piUuid }));
     }
+    if (RELAY_ACTIONS.includes(action)) askRelay();
   };
   ws.onmessage = (e) => {
     let m;
@@ -227,7 +265,12 @@ function connectElgatoStreamDeckSocket(port, uuid, evt, info, actionInfo) {
       gs = m.payload?.settings ?? {};
       gsReady = true;
       if (action === "dev.tapparello.agent-vitals.usage-meter") buildRates();
+      if (RELAY_ACTIONS.includes(action)) buildRelay();
       return;
+    }
+    if (m.event === "sendToPropertyInspector" && m.payload?.relay) {
+      relayInfo = m.payload.relay;
+      if (RELAY_ACTIONS.includes(action) && gsReady) buildRelay();
     }
     if (m.event === "sendToPropertyInspector" && Array.isArray(m.payload?.models)) {
       models = m.payload.models;
