@@ -1,0 +1,14 @@
+// Relay fra le sessioni Claude Code nel cloud e lo Stream Deck.
+// Pubblicazione e chiavi: vedi DECK-REMOTO.md nella radice del repository.
+{
+  "name": "claude-deck-relay",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  // Niente log delle richieste: i corpi contengono i comandi da approvare.
+  "observability": { "enabled": false },
+  "durable_objects": {
+    "bindings": [{ "name": "BACHECA", "class_name": "BachecaDO" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BachecaDO"] }]
+}

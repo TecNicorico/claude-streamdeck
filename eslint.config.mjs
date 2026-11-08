@@ -47,7 +47,12 @@ export default [
     },
   },
   {
-    // The bundle is generated; never lint it.
-    ignores: ["dev.tapparello.agent-vitals.sdPlugin/bin/**", "node_modules/**"],
+    // Il relay gira su Cloudflare Workers, non su Node.
+    files: ["relay/src/**/*.js"],
+    languageOptions: { globals: { Response: "readonly", Request: "readonly", crypto: "readonly" } },
+  },
+  {
+    // The bundle is generated; never lint it. Neither is wrangler's local build output.
+    ignores: ["dev.tapparello.agent-vitals.sdPlugin/bin/**", "node_modules/**", "relay/.wrangler/**"],
   },
 ];

@@ -1,0 +1,171 @@
+# --- Stream Deck: hook delle sessioni cloud (generato da tools/gen-setup.mjs) ---
+# Le chiavi NON stanno qui: DECK_RELAY_URL e DECK_RELAY_TOKEN vanno nelle variabili
+# d'ambiente dell'ambiente cloud. Senza, l'hook non fa niente.
+mkdir -p "$HOME/.claude/deck"
+cat > "$HOME/.claude/deck/deck-hook.mjs" <<'DECK_HOOK_FINE'
+#!/usr/bin/env node
+// Hook delle sessioni Claude Code nel cloud: le collega allo Stream Deck tramite il relay.
+//
+//   PermissionRequest  apre una richiesta sul relay e aspetta la decisione dal deck
+//   SessionStart       la sessione esiste           (stato: idle)
+//   UserPromptSubmit   la sessione lavora            (stato: busy)
+//   Stop               il turno è finito             (stato: idle, «finito» per un minuto)
+//   SessionEnd         la sessione è chiusa          (sparisce dal deck)
+//
+// Configurazione, dalle variabili d'ambiente dell'ambiente cloud:
+//   DECK_RELAY_URL    l'indirizzo del Worker, es. https://claude-deck-relay.<nome>.workers.dev
+//   DECK_RELAY_TOKEN  la chiave CLOUD del relay (mai quella del deck)
+//   DECK_ATTESA_S     quanti secondi aspettare il deck prima di lasciar decidere claude.ai
+//
+// Regola d'oro: questo script non blocca mai Claude per un suo guasto. Relay spento,
+// chiave sbagliata, rete negata, risposta strana: esce senza scrivere niente, e Claude
+// Code mostra la richiesta normale. L'unica cosa che scrive su stdout è una decisione
+// che il deck ha preso davvero.
+//
+// `node deck-hook.mjs --installa` scrive gli hook in ~/.claude/settings.json (lo usa lo
+// script di setup dell'ambiente) e lascia intatto tutto il resto del file.
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, basename } from "node:path";
+
+const MARCA = "deck-hook.mjs";
+const EVENTI = { SessionStart: "avvio", UserPromptSubmit: "lavora", Stop: "fine", SessionEnd: "chiusa" };
+const ATTESA_DEFAULT_S = 60;
+const RIFIUTO = "Rifiutato dallo Stream Deck";
+
+export function attesaS(env = process.env) {
+  const n = Number(env.DECK_ATTESA_S);
+  return Number.isFinite(n) && n >= 5 && n <= 600 ? Math.round(n) : ATTESA_DEFAULT_S;
+}
+
+// La sessione come la conosce il relay: l'id del container (da cui viene il link su
+// claude.ai) e il nome della cartella, che è quello che si legge sul tasto.
+export function sessioneDa(payload, env = process.env) {
+  const idRemoto = env.CLAUDE_CODE_REMOTE_SESSION_ID || "";
+  const id = idRemoto || String(payload?.session_id ?? "");
+  if (!id) return null;
+  const cwd = String(payload?.cwd ?? "");
+  return { id, idRemoto, nome: basename(cwd) || "cloud", cwd };
+}
+
+// La decisione del deck tradotta nella risposta che Claude Code si aspetta. Una
+// risposta a una domanda si riscontra con le domande VERE, quelle dell'input originale
+// che ha solo questo processo: un'etichetta che non è fra le opzioni non passa.
+export function rispostaPerClaude(decisione, toolInput) {
+  const wrap = (d) => ({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: d } });
+  if (decisione?.tipo === "approva") return wrap({ behavior: "allow" });
+  if (decisione?.tipo === "rifiuta") return wrap({ behavior: "deny", message: RIFIUTO });
+  if (decisione?.tipo === "rispondi") {
+    const qs = Array.isArray(toolInput?.questions) ? toolInput.questions : [];
+    if (!qs.length) return null;
+    const answers = {};
+    for (const q of qs) {
+      if (q?.multiSelect) return null;
+      const scelta = decisione.risposte?.[q?.question];
+      if (typeof scelta !== "string" || !(q.options ?? []).some((o) => o?.label === scelta)) return null;
+      answers[q.question] = scelta;
+    }
+    return wrap({ behavior: "allow", updatedInput: { ...toolInput, answers } });
+  }
+  return null;
+}
+
+async function chiama(base, token, path, body, ms) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), ms);
+  try {
+    const r = await fetch(base.replace(/\/+$/, "") + path, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ac.signal,
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+export async function gestisci(payload, { env = process.env, fetchAttesa = chiama, ora = Date.now } = {}) {
+  const base = env.DECK_RELAY_URL, token = env.DECK_RELAY_TOKEN;
+  if (!base || !token || !/^https?:\/\//.test(base)) return null;
+  // Solo nel cloud: sul PC le richieste le prende già il plugin, col suo hook locale.
+  if (env.CLAUDE_CODE_REMOTE !== "true" && env.DECK_ANCHE_LOCALE !== "1") return null;
+  const sessione = sessioneDa(payload, env);
+  if (!sessione) return null;
+  const ev = payload?.hook_event_name;
+
+  if (EVENTI[ev]) {
+    await fetchAttesa(base, token, "/v1/cloud/stato", { sessione, evento: EVENTI[ev] }, 5_000);
+    return null;
+  }
+  if (ev !== "PermissionRequest" || !payload?.tool_name) return null;
+
+  const s = attesaS(env);
+  const aperta = await fetchAttesa(base, token, "/v1/cloud/richiesta", {
+    sessione, tool: payload.tool_name, input: payload.tool_input ?? {}, attesaS: s,
+  }, 8_000);
+  if (!aperta?.id) return null;
+  const fine = ora() + s * 1000;
+  while (ora() < fine) {
+    const r = await fetchAttesa(base, token, "/v1/cloud/attendi", { id: aperta.id }, 25_000);
+    if (r?.stato === "decisa") return rispostaPerClaude(r.decisione, payload.tool_input ?? {});
+    if (r?.stato === "sconosciuta") return null;
+    // Relay irraggiungibile per un attimo: si riprova, senza martellare.
+    if (!r) await new Promise((res) => setTimeout(res, 1_000));
+  }
+  await fetchAttesa(base, token, "/v1/cloud/rinuncia", { id: aperta.id }, 5_000);
+  return null;
+}
+
+// ---------- installazione: gli hook in ~/.claude/settings.json ----------
+export function conHook(settings, comando, attesa) {
+  const out = settings && typeof settings === "object" ? { ...settings } : {};
+  const hooks = out.hooks && typeof out.hooks === "object" ? { ...out.hooks } : {};
+  const nostro = (timeout, matcher) => ({ ...(matcher != null ? { matcher } : {}), hooks: [{ type: "command", command: comando, timeout }] });
+  const evento = (nome, gruppo) => {
+    // Toglie le nostre voci di prima (riconosciute dal nome dello script) e tiene le altrui.
+    const altri = (Array.isArray(hooks[nome]) ? hooks[nome] : [])
+      .map((g) => ({ ...g, hooks: (g.hooks ?? []).filter((h) => !String(h?.command ?? "").includes(MARCA)) }))
+      .filter((g) => g.hooks.length);
+    hooks[nome] = [...altri, gruppo];
+  };
+  evento("PermissionRequest", nostro(attesa + 15, ""));
+  for (const nome of Object.keys(EVENTI)) evento(nome, nostro(10, null));
+  out.hooks = hooks;
+  return out;
+}
+
+function installa() {
+  const dir = join(homedir(), ".claude");
+  const file = join(dir, "settings.json");
+  mkdirSync(dir, { recursive: true });
+  let attuali = {};
+  if (existsSync(file)) {
+    try { attuali = JSON.parse(readFileSync(file, "utf8")); } catch {
+      process.stderr.write(`deck-hook: ${file} non è JSON valido, non lo tocco\n`);
+      return 1;
+    }
+  }
+  const comando = `node "$HOME/.claude/deck/${MARCA}"`;
+  writeFileSync(file, JSON.stringify(conHook(attuali, comando, attesaS()), null, 2) + "\n");
+  process.stdout.write(`deck-hook: hook installati in ${file}\n`);
+  return 0;
+}
+
+async function principale() {
+  if (process.argv.includes("--installa")) process.exit(installa());
+  let payload = {};
+  try { payload = JSON.parse(readFileSync(0, "utf8") || "{}"); } catch { return; }
+  const out = await gestisci(payload).catch(() => null);
+  if (out) process.stdout.write(JSON.stringify(out));
+}
+
+// Eseguito come script (non importato dai test).
+if (process.argv[1] && basename(process.argv[1]) === MARCA) principale();
+DECK_HOOK_FINE
+node "$HOME/.claude/deck/deck-hook.mjs" --installa || true
+# --- fine Stream Deck ---
