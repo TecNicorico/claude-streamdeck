@@ -23,13 +23,25 @@ let ws, piUuid, settings = {}, action = "", models = [], gs = {}, gsReady = fals
 const RATE_DEFAULTS = { opus: [5, 25], sonnet: [2, 10], haiku: [1, 5], fable: [10, 50] };
 const BUDGET_FIELD = { key: "budget", type: "number", label: "Budget $ for this window (optional - turns the key into a % ring)" };
 const INSTALL_FIELD = { key: "_install", type: "install", label: "One-time setup - merge into the \"hooks\" object of ~/.claude/settings.json, then restart Claude Code" };
+// Un tasto che mostra e basta può fare da tasto della riga in basso mentre c'è una
+// richiesta in attesa, e tornare com'era dopo (vedi slotDi in src/view.js).
+const SLOT_FIELD = { key: "slot", type: "select", label: "Con una richiesta in attesa diventa", default: "", options: [
+  { value: "", label: "Resta com'è" },
+  { value: "approve-deny", label: "Deny / opzione a sinistra" },
+  { value: "approve-always", label: "Info / opzione centrale" },
+  { value: "approve-allow", label: "Allow / opzione a destra" },
+] };
 const FIELDS = {
-  "dev.tapparello.agent-vitals.usage-session": [BUDGET_FIELD],
-  "dev.tapparello.agent-vitals.usage-weekly": [BUDGET_FIELD],
+  "dev.tapparello.agent-vitals.usage-session": [BUDGET_FIELD, SLOT_FIELD],
+  "dev.tapparello.agent-vitals.usage-weekly": [BUDGET_FIELD, SLOT_FIELD],
   "dev.tapparello.agent-vitals.usage-model": [
     { key: "model", type: "modelselect", label: "Model to display" },
     BUDGET_FIELD,
+    SLOT_FIELD,
   ],
+  "dev.tapparello.agent-vitals.burn-rate": [SLOT_FIELD],
+  "dev.tapparello.agent-vitals.today": [SLOT_FIELD],
+  "dev.tapparello.agent-vitals.sessions": [SLOT_FIELD],
   "dev.tapparello.agent-vitals.project": [
     { key: "label", type: "text", label: "Button label" },
     { key: "path", type: "text", label: "Project folder (full path)" },
@@ -54,6 +66,7 @@ const FIELDS = {
       { value: "7day", label: "7-day" },
     ] },
     { key: "label", type: "text", label: "Button label (optional)" },
+    SLOT_FIELD,
   ],
   "dev.tapparello.agent-vitals.approver-status": [
     { key: "label", type: "text", label: "Button label (optional)" },
@@ -174,7 +187,7 @@ function build() {
 }
 // Relay e Supabase: impostazioni condivise da tutti i tasti (global settings), come le
 // tariffe del tasto Usage. La chiave è quella del DECK, mai quella del cloud.
-const RELAY_ACTIONS = ["approve-allow", "approve-always", "approve-deny", "approver-status", "approver-waiting"].map((k) => "dev.tapparello.agent-vitals." + k);
+const RELAY_ACTIONS = ["approve-allow", "approve-always", "approve-deny", "approver-status", "approver-waiting", "usage-session", "usage-weekly"].map((k) => "dev.tapparello.agent-vitals." + k);
 const RELAY_FIELDS = [
   { key: "relayUrl", label: "Relay per le sessioni cloud (https://…workers.dev)", type: "text" },
   { key: "relayToken", label: "Chiave DECK del relay", type: "password" },

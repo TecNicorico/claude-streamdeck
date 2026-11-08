@@ -126,6 +126,24 @@ export function sessionEta(state, now) {
   return hh > 0 ? `cap in ~${hh}h ${mm}m` : `cap in ~${mm}m`;
 }
 
+// ---------- tasti che fanno da riga in basso ----------
+// Un tasto che si limita a mostrare (i consumi, il conteggio delle sessioni…) può
+// prendere il posto di un tasto della riga in basso finché c'è una richiesta in attesa:
+// lo dice la sua impostazione `slot`. Senza richieste torna a mostrare ciò che mostrava.
+// Solo tasti che mostrano e basta: uno che apre una finestra o un'app, cambiando faccia
+// sotto il dito, farebbe qualcosa che la persona non ha scelto.
+export const TASTI_CON_SLOT = new Set(["usage-session", "usage-weekly", "usage-model", "burn-rate", "today", "usage-meter", "sessions"]);
+export const SLOT_VALIDI = new Set(["approve-deny", "approve-always", "approve-allow"]);
+export function slotDi(kind, settings) {
+  const s = settings?.slot;
+  return TASTI_CON_SLOT.has(kind) && SLOT_VALIDI.has(s) ? s : null;
+}
+// Che cosa disegna (e a cosa risponde) adesso un tasto di tipo `kind`.
+export function tipoDaMostrare(kind, settings, queue) {
+  const slot = slotDi(kind, settings);
+  return slot && approvable(queue) ? slot : kind;
+}
+
 // ---------- the view ----------
 // `env` carries everything the switch used to read from module scope:
 //   state           the data state (usage, sessions, approveQueue, …)

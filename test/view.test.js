@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { viewFor, gaugeMode, modelListIndex, sessionEta, fmtAgo, fmtReset } from "../src/view.js";
+import { viewFor, gaugeMode, modelListIndex, sessionEta, fmtAgo, fmtReset, tipoDaMostrare, slotDi } from "../src/view.js";
 
 // keyart returns a data URI, so decode before asserting. These tests deliberately
 // assert on the TEXT the key draws rather than on SVG structure: the text is the
@@ -509,4 +509,26 @@ test("una richiesta del cloud si riconosce, e un guasto dell'hook locale non la 
   assert.match(t, /M7\.2 18\.5 h10/, "la nuvola in alto a sinistra");
   assert.doesNotMatch(t, /port busy/);
   assert.doesNotMatch(drawn("approve-allow", { state: { ...emptyState(), approveQueue: [req()] } }), /M7\.2 18\.5 h10/, "una richiesta locale non ha la nuvola");
+});
+
+// ---------- tasti di consumi che fanno da Deny/Allow (richiesta del 08/11/2026) ----------
+test("un tasto di consumi impostato come Allow lo diventa solo con una richiesta in attesa", () => {
+  const set = { slot: "approve-allow" };
+  assert.equal(tipoDaMostrare("usage-weekly", set, []), "usage-weekly", "niente in attesa: mostra i consumi");
+  assert.equal(tipoDaMostrare("usage-weekly", set, [req()]), "approve-allow");
+  assert.equal(tipoDaMostrare("usage-session", { slot: "approve-deny" }, [req()]), "approve-deny");
+  assert.equal(tipoDaMostrare("usage-session", {}, [req()]), "usage-session", "senza impostazione resta com'è");
+});
+
+test("una domanda a cui il deck non sa rispondere non fa cambiare faccia ai tasti di consumi", () => {
+  const multipla = req({ toolName: "AskUserQuestion", toolInput: { questions: [{ question: "Q", multiSelect: true, options: [{ label: "a" }, { label: "b" }] }] } });
+  assert.equal(tipoDaMostrare("usage-weekly", { slot: "approve-allow" }, [multipla]), "usage-weekly");
+});
+
+test("solo i tasti che mostrano e basta possono fare da riga in basso", () => {
+  assert.equal(slotDi("usage-session", { slot: "approve-allow" }), "approve-allow");
+  for (const kind of ["launch", "custom", "project", "approver-status", "focus-session"]) {
+    assert.equal(slotDi(kind, { slot: "approve-allow" }), null, kind);
+  }
+  assert.equal(slotDi("usage-session", { slot: "approve-always-allow" }), null, "un valore sconosciuto non vale");
 });

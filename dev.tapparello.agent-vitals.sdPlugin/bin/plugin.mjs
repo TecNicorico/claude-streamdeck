@@ -5122,6 +5122,16 @@ function sessionEta(state2, now) {
   const hh = Math.floor(msLeft / 36e5), mm = Math.round(msLeft % 36e5 / 6e4);
   return hh > 0 ? `cap in ~${hh}h ${mm}m` : `cap in ~${mm}m`;
 }
+var TASTI_CON_SLOT = /* @__PURE__ */ new Set(["usage-session", "usage-weekly", "usage-model", "burn-rate", "today", "usage-meter", "sessions"]);
+var SLOT_VALIDI = /* @__PURE__ */ new Set(["approve-deny", "approve-always", "approve-allow"]);
+function slotDi(kind, settings) {
+  const s = settings?.slot;
+  return TASTI_CON_SLOT.has(kind) && SLOT_VALIDI.has(s) ? s : null;
+}
+function tipoDaMostrare(kind, settings, queue) {
+  const slot = slotDi(kind, settings);
+  return slot && approvable(queue) ? slot : kind;
+}
 function viewFor(kind, env) {
   const {
     state: state2,
@@ -5637,7 +5647,12 @@ var TIMEOUT_PAD_S = 3;
 var approveSeq = 0;
 var hookServer = null;
 var renderApproveAll = () => renderAll(APPROVE_KINDS);
-var hasApproveKey = () => [...views.values()].some((v) => APPROVE_KINDS.includes(v.kind));
+var faDaApprovazione = (v) => APPROVE_KINDS.includes(v?.kind) || !!slotDi(v?.kind, v?.settings);
+var hasApproveKey = () => [...views.values()].some(faDaApprovazione);
+var tipoAdesso = (context, kind) => {
+  const v = views.get(context);
+  return v ? tipoDaMostrare(v.kind, v.settings, state.approveQueue) : kind;
+};
 function queueChanged() {
   state.pending = pendingBySession(state.approveQueue);
   for (const id of [...state.risposte.keys()]) if (!state.approveQueue.some((r) => r.id === id)) state.risposte.delete(id);
@@ -5990,12 +6005,14 @@ var setImage = (context, image) => send({ event: "setImage", context, payload: {
 var setTitle = (context) => send({ event: "setTitle", context, payload: { title: "", target: 0 } });
 var showAlert = (context) => send({ event: "showAlert", context });
 var kindOf = (action) => action.replace("dev.tapparello.agent-vitals.", "");
-function render(context, kind) {
+function render(context, kindProprio) {
   const v = views.get(context);
   const cy = cycle.get(context);
+  const kind = tipoAdesso(context, kindProprio);
   const { image, painted } = viewFor(kind, {
     state,
-    settings: v?.settings ?? {},
+    // Un tasto di consumi che fa da Allow non ha le impostazioni di un Allow.
+    settings: kind === kindProprio ? v?.settings ?? {} : {},
     now: Date.now(),
     animPhase,
     usageViewMode: usageView.get(context) ?? "cost",
@@ -6014,7 +6031,10 @@ function render(context, kind) {
   if (image != null) setImage(context, image);
 }
 function renderAll(kinds) {
-  for (const [context, v] of views) if (kinds.includes(v.kind)) render(context, v.kind);
+  for (const [context, v] of views) {
+    const slot = slotDi(v.kind, v.settings);
+    if (kinds.includes(v.kind) || slot && kinds.includes(slot)) render(context, v.kind);
+  }
 }
 function autoSlotFor(context) {
   const keys = [...views.entries()].filter(([, v]) => v.kind === "approver-status" && !(v.settings?.project && v.settings.project.trim())).map(([ctx, v]) => ({ context: ctx, device: v.device, row: v.row, col: v.col }));
@@ -6428,7 +6448,10 @@ function onKeyDown(context, kind) {
           queue: state.approveQueue,
           shownId: shownReq.get(context) ?? null,
           lastHeadChangeAt: state.lastHeadChangeAt,
-          now: Date.now()
+          now: Date.now(),
+          // Un tasto di consumi che è appena diventato Allow: un secondo intero prima di
+          // accettare una pressione, perché poteva essere un tocco per aggiornare i consumi.
+          settleMs: APPROVE_KINDS.includes(views.get(context)?.kind) ? void 0 : 1e3
         });
         if (d.action === "none") return;
         if (d.action === "alert") {
@@ -6726,7 +6749,7 @@ if (process.argv.includes("--selftest")) {
       render(context, kindOf(action));
       if (kindOf(action) === "usage-meter" || GAUGE_WINDOW[kindOf(action)]) pollUsageMeter();
     } else if (event === "willDisappear") {
-      const wasApproveKey = APPROVE_KINDS.includes(views.get(context)?.kind);
+      const wasApproveKey = faDaApprovazione(views.get(context));
       views.delete(context);
       cycle.delete(context);
       focusIdx.delete(context);
@@ -6767,7 +6790,7 @@ if (process.argv.includes("--selftest")) {
         } });
       }
     } else if (event === "keyDown" && action) {
-      onKeyDown(context, kindOf(action));
+      onKeyDown(context, tipoAdesso(context, kindOf(action)));
     } else if (event === "keyUp" && action) {
       onKeyUp(context);
     }

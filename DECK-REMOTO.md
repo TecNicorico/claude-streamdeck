@@ -150,6 +150,16 @@ vale come produzione.
 pannello copia il testo di «One-time setup» e incollalo dentro `"hooks"` nel file
 `%USERPROFILE%\.claude\settings.json`, poi riavvia le sessioni di Claude Code.
 
+## I tasti dei consumi possono fare da Deny e Allow
+
+Se non vuoi tenere Deny e Allow sempre sul deck, i tasti che mostrano e basta
+(Session 5H, Weekly, Model, Burn rate, Today, Usage, Claude Code) possono prenderne il
+posto solo mentre c'è una richiesta in attesa. Nelle impostazioni del tasto:
+**Con una richiesta in attesa diventa** → Deny / opzione a sinistra, Info / opzione
+centrale, oppure Allow / opzione a destra. Senza richieste tornano a mostrare i
+consumi. Appena cambiano faccia aspettano un secondo prima di accettare una
+pressione, così un tocco per aggiornare i consumi non diventa un'approvazione.
+
 ## Come si usa: la riga in basso
 
 I tre tasti di approvazione cambiano faccia secondo cosa c'è in attesa.

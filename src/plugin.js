@@ -22,7 +22,7 @@ import { startHookServer, BADPATH_WINDOW_MS, BADPATH_MIN_HITS } from "./hookserv
 import { statoIniziale, premi, facce, SLOT } from "./domande.js";
 import { sessioniCloud, richiesteNuove, richiesteSparite, voceDa, decisioneDa, intervallo, urlValido } from "./relay.js";
 import {
-  viewFor, gaugeMode, GAUGE_WINDOW, modelList, modelListIndex, sessionEta, PULSE_MS,
+  viewFor, gaugeMode, GAUGE_WINDOW, modelList, modelListIndex, sessionEta, PULSE_MS, slotDi, tipoDaMostrare,
 } from "./view.js";
 
 const IS_MAC = process.platform === "darwin";
@@ -367,7 +367,16 @@ let approveSeq = 0;
 let hookServer = null;
 
 const renderApproveAll = () => renderAll(APPROVE_KINDS);
-const hasApproveKey = () => [...views.values()].some((v) => APPROVE_KINDS.includes(v.kind));
+// Un tasto di consumi impostato per fare da Deny/Allow conta come tasto di approvazione:
+// senza nessuno dei due, le richieste resterebbero al terminale e a claude.ai.
+const faDaApprovazione = (v) => APPROVE_KINDS.includes(v?.kind) || !!slotDi(v?.kind, v?.settings);
+const hasApproveKey = () => [...views.values()].some(faDaApprovazione);
+// Il tipo che questo tasto disegna adesso: il suo, o quello della riga in basso che fa
+// mentre c'è una richiesta (vedi `slot` in view.js).
+const tipoAdesso = (context, kind) => {
+  const v = views.get(context);
+  return v ? tipoDaMostrare(v.kind, v.settings, state.approveQueue) : kind;
+};
 
 // Every QUEUE MUTATION goes through here, never bare renderApproveAll(): state.pending is
 // derived from the queue and the Status/WAITING keys read it, so they have to repaint with
@@ -806,12 +815,14 @@ const kindOf = (action) => action.replace("dev.tapparello.agent-vitals.", "");
 // Adapter: resolve this key's per-context UI state, ask view.js what to draw, then
 // perform the two side effects it deliberately does not — pushing the image, and
 // recording what the approve keys painted for the press guard to check.
-function render(context, kind) {
+function render(context, kindProprio) {
   const v = views.get(context);
   const cy = cycle.get(context);
+  const kind = tipoAdesso(context, kindProprio);
   const { image, painted } = viewFor(kind, {
     state,
-    settings: v?.settings ?? {},
+    // Un tasto di consumi che fa da Allow non ha le impostazioni di un Allow.
+    settings: kind === kindProprio ? v?.settings ?? {} : {},
     now: Date.now(),
     animPhase,
     usageViewMode: usageView.get(context) ?? "cost",
@@ -831,7 +842,10 @@ function render(context, kind) {
 }
 
 function renderAll(kinds) {
-  for (const [context, v] of views) if (kinds.includes(v.kind)) render(context, v.kind);
+  for (const [context, v] of views) {
+    const slot = slotDi(v.kind, v.settings);
+    if (kinds.includes(v.kind) || (slot && kinds.includes(slot))) render(context, v.kind);
+  }
 }
 
 // Slot for this auto (unbound) Status key among the visible ones, by physical
@@ -1274,6 +1288,9 @@ function onKeyDown(context, kind) {
           shownId: shownReq.get(context) ?? null,
           lastHeadChangeAt: state.lastHeadChangeAt,
           now: Date.now(),
+          // Un tasto di consumi che è appena diventato Allow: un secondo intero prima di
+          // accettare una pressione, perché poteva essere un tocco per aggiornare i consumi.
+          settleMs: APPROVE_KINDS.includes(views.get(context)?.kind) ? undefined : 1_000,
         });
         if (d.action === "none") return;
         if (d.action === "alert") { renderApproveAll(); return showAlert(context); }
@@ -1580,7 +1597,7 @@ if (process.argv.includes("--selftest")) {
       render(context, kindOf(action));
       if (kindOf(action) === "usage-meter" || GAUGE_WINDOW[kindOf(action)]) pollUsageMeter();
     } else if (event === "willDisappear") {
-      const wasApproveKey = APPROVE_KINDS.includes(views.get(context)?.kind);
+      const wasApproveKey = faDaApprovazione(views.get(context));
       views.delete(context);
       cycle.delete(context);
       focusIdx.delete(context);
@@ -1623,7 +1640,7 @@ if (process.argv.includes("--selftest")) {
         } });
       }
     } else if (event === "keyDown" && action) {
-      onKeyDown(context, kindOf(action));
+      onKeyDown(context, tipoAdesso(context, kindOf(action)));
     } else if (event === "keyUp" && action) {
       onKeyUp(context);
     }
