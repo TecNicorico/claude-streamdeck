@@ -233,10 +233,12 @@ test("i tasti della terza pagina non escono dal riquadro, con i numeri più lung
   const grande = {
     versione: 1,
     stagione: { id: 2, codice: "2026-2027", nome: "Stagione 2026/2027", precedente: "2025-2026", sfasamentoGiorni: 365 },
-    vendite: { fatturato: 12_345_678.9, fatturatoOggi: 98_765.4, fatturatoAnnoScorso: 1, ordiniOggi: 12_345, ordiniIeri: 9_999, ordiniAnnoScorsoOggi: 1, ufficializzate: 4_321 },
+    vendite: { fatturato: 12_345_678.9, fatturatoOggi: 98_765.4, fatturatoAnnoScorso: 1, ordiniOggi: 12_345, ordiniIeri: 9_999, ordiniAnnoScorsoOggi: 1, ufficializzate: 4_321,
+      ufficializzateMerch: 4_321, ufficializzateAnnuari: 4_321, lineeMerch: 12_345, lineeAnnuari: 12_345 },
     directory: { raggiunte: 4_253, raggiunteAnnoScorso: 1, daAssegnare: 1_234, competitor: 321, richieste: 1_234 },
-    hiring: { daScrutinare: 12_345, arrivateOggi: 1_234, risEletti: 3_000, documentiDaVerificare: 1_234, elettiSenzaDocumento: 1_234 },
-    operativo: { avvisiRossi: 12_345, avvisiGialli: 12_345, jobFalliti: 12_345, jobInRitardo: 12_345, plaoFirmate: 1_234, plaoDaFirmare: 1_234, fornitoriProblema: 1_234 },
+    hiring: { daScrutinare: 12_345, arrivateOggi: 1_234, candidatiAccettati: 12_345, risEletti: 3_000, documentiDaVerificare: 1_234, elettiSenzaDocumento: 1_234 },
+    operativo: { jobFalliti: 12_345, jobInRitardo: 12_345, plaoFirmate: 1_234, plaoDaFirmare: 1_234, fornitoriProblema: 1_234 },
+    personale: { notificheNonLette: 12_345, menzioniNonLette: 1_234 },
   };
   const conf = { completa: true };
   for (const metrica of Object.keys(METRICHE)) {

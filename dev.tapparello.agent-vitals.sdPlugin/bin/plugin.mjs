@@ -4496,6 +4496,24 @@ var METRICHE = {
     pagina: "/directory",
     vista: (d) => ({ valore: numero(d.vendite.ufficializzate), sub: `su ${numero(d.directory.raggiunte)} raggiunte` })
   },
+  // Le ufficializzate linea per linea (TheCore 0157): una scuola col merch firmato
+  // e l'annuario no conta in una sola delle due.
+  ufficializzate_merch: {
+    gruppo: "Vendite",
+    nome: "Merch ufficializzati",
+    titolo: "Merch",
+    glifo: "maglietta",
+    pagina: "/l/merch",
+    vista: (d) => ({ valore: numero(d.vendite.ufficializzateMerch), sub: `firmati su ${numero(d.vendite.lineeMerch)}` })
+  },
+  ufficializzate_annuari: {
+    gruppo: "Vendite",
+    nome: "Annuari ufficializzati",
+    titolo: "Annuari",
+    glifo: "libro",
+    pagina: "/l/annuari",
+    vista: (d) => ({ valore: numero(d.vendite.ufficializzateAnnuari), sub: `firmati su ${numero(d.vendite.lineeAnnuari)}` })
+  },
   // ------------------------------------------------------------- directory
   raggiunte: {
     gruppo: "Directory",
@@ -4541,6 +4559,15 @@ var METRICHE = {
       tono: d.hiring.daScrutinare > 0 ? "attenzione" : null
     })
   },
+  candidati_accettati: {
+    // Accettati e non ancora eletti (TheCore 0157): i candidati RIS degli inviti.
+    gruppo: "Hiring",
+    nome: "Candidati RIS accettati",
+    titolo: "Accettati",
+    glifo: "utenteSpunta",
+    pagina: "/ris/candidature",
+    vista: (d) => ({ valore: numero(d.hiring.candidatiAccettati), sub: "non ancora eletti" })
+  },
   ris_documenti: {
     gruppo: "Hiring",
     nome: "Documenti da verificare",
@@ -4566,15 +4593,18 @@ var METRICHE = {
     vista: (d) => ({ valore: numero(d.hiring.risEletti), sub: "eletti col documento" })
   },
   // ------------------------------------------------------------- operativo
-  avvisi: {
+  notifiche: {
+    // Le TUE notifiche non lette (TheCore 0157): la chiave è personale, e la
+    // campanella è di chi la guarda. La cronologia sta nella Dashboard.
     gruppo: "Operativo",
-    nome: "Avvisi della Dashboard",
-    titolo: "Avvisi",
+    nome: "Le mie notifiche",
+    titolo: "Notifiche",
     glifo: "campana",
     pagina: "/dashboard",
     vista: (d) => {
-      const r = d.operativo.avvisiRossi, g = d.operativo.avvisiGialli;
-      return { valore: numero(r), sub: `rossi \xB7 ${numero(g)} gialli`, tono: r > 0 ? "attenzione" : null };
+      const n = d.personale?.notificheNonLette, m = d.personale?.menzioniNonLette ?? 0;
+      if (typeof n !== "number") return { valore: "--", sub: "TheCore da aggiornare" };
+      return { valore: numero(n), sub: m > 0 ? conto(m, "menzione", "menzioni") : "non lette", tono: n > 0 ? "attenzione" : null };
     }
   },
   job: {
@@ -4614,8 +4644,10 @@ var METRICHE = {
   }
 };
 var METRICA_DEFAULT = "fatturato";
+var METRICHE_RINOMINATE = { avvisi: "notifiche" };
 function metricaDi(settings) {
-  return Object.hasOwn(METRICHE, settings?.metrica) ? settings.metrica : METRICA_DEFAULT;
+  const m = METRICHE_RINOMINATE[settings?.metrica] ?? settings?.metrica;
+  return Object.hasOwn(METRICHE, m) ? m : METRICA_DEFAULT;
 }
 function urlPagina(app, pagina2) {
   const base2 = String(app ?? "").trim().replace(/\/+$/, "");
@@ -5283,6 +5315,18 @@ var ICONE = {
   documento: [["p", foglio], ["t", "M13.8 2.8 V7.8 H18.8"], ["t", "M8.4 14 L10.7 16.3 L15.1 11.8"]],
   documentoManca: [["p", foglio], ["t", "M13.8 2.8 V7.8 H18.8"], ["t", "M11.75 10 V14.2"], ["t", "M11.75 17.3 V17.4"]],
   stella: [["p", stellaD(5, 9.8, 4.3, 12, 12.8)]],
+  maglietta: [["p", "M8.6 3.6 L4 5.6 L2.4 10 L5.6 11.4 V20.4 H18.4 V11.4 L21.6 10 L20 5.6 L15.4 3.6 C14.8 5 13.6 5.8 12 5.8 C10.4 5.8 9.2 5 8.6 3.6 Z"]],
+  libro: [
+    ["p", "M6.2 2.8 H19.4 V18 H6.2 A1.6 1.6 0 0 1 4.6 16.4 V4.4 A1.6 1.6 0 0 1 6.2 2.8 Z"],
+    ["l", "M4.8 18.8 A2.2 2.2 0 0 0 6.6 21.2 H19.4"],
+    ["t", "M8.2 7 H15.8"],
+    ["t", "M8.2 10.2 H13.4"]
+  ],
+  utenteSpunta: [
+    ["p", cerchio(9.5, 7.9, 3.9)],
+    ["p", "M2.3 20.5 C2.3 16.3 5.5 13.6 9.5 13.6 C13.5 13.6 16.7 16.3 16.7 20.5 Z"],
+    ["l", "M15.6 10.3 L17.9 12.6 L22.4 8"]
+  ],
   campana: [
     ["p", "M12 2.8 C8.5 2.8 6.2 5.4 6.2 9.1 V12.9 L4.4 16 V17.4 H19.6 V16 L17.8 12.9 V9.1 C17.8 5.4 15.5 2.8 12 2.8 Z"],
     ["p", "M9.6 18.9 A2.4 2.4 0 0 0 14.4 18.9 Z"]

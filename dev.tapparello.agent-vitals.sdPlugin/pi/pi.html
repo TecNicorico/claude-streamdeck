@@ -105,14 +105,17 @@ const METRICHE_PI = [
   ["fatturato", "Vendite", "Fatturato della stagione"],
   ["ordini_oggi", "Vendite", "Ordini di oggi"],
   ["ufficializzate", "Vendite", "Scuole ufficializzate"],
+  ["ufficializzate_merch", "Vendite", "Merch ufficializzati"],
+  ["ufficializzate_annuari", "Vendite", "Annuari ufficializzati"],
   ["raggiunte", "Directory", "Scuole raggiunte"],
   ["da_assegnare", "Directory", "Scuole senza sales"],
   ["richieste", "Directory", "Richieste dal form da assegnare"],
   ["ris_da_scrutinare", "Hiring", "Candidature da scrutinare"],
+  ["candidati_accettati", "Hiring", "Candidati RIS accettati"],
   ["ris_documenti", "Hiring", "Documenti da verificare"],
   ["eletti_senza_documento", "Hiring", "Eletti senza documento"],
   ["ris_eletti", "Hiring", "RIS eletti"],
-  ["avvisi", "Operativo", "Avvisi della Dashboard"],
+  ["notifiche", "Operativo", "Le mie notifiche"],
   ["job", "Operativo", "Job dell'outbox"],
   ["plao", "Operativo", "PLAO da controllare"],
   ["fornitori", "Operativo", "Ordini fornitori con un problema"],
@@ -226,7 +229,8 @@ function build() {
         const o = document.createElement("option"); o.value = id; o.textContent = nome;
         gruppi.get(gruppo).append(o);
       }
-      sel.value = settings[f.key] ?? METRICHE_PI[0][0];
+      const RINOMINATE = { avvisi: "notifiche" }; // come METRICHE_RINOMINATE in src/thecore.js
+      sel.value = RINOMINATE[settings[f.key]] ?? settings[f.key] ?? METRICHE_PI[0][0];
       if (sel.selectedIndex < 0) sel.value = METRICHE_PI[0][0];
       sel.onchange = () => { settings[f.key] = sel.value; save(); };
       div.append(l, sel);

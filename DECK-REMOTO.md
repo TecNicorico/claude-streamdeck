@@ -284,14 +284,17 @@ repository `thecore-v2`, da portare su staging e poi in produzione).
 | Vendite | Fatturato della stagione | lordo dello shop, al netto dei resi, e la variazione contro l'anno scorso alla stessa data | P&L effettivo |
 | Vendite | Ordini di oggi | ordini di oggi, incasso di oggi e ordini di ieri | Dashboard ordini |
 | Vendite | Scuole ufficializzate | firmate, su quante raggiunte | Directory |
+| Vendite | Merch ufficializzati | scuole col merch firmato, su quante lavorano il merch | Merch |
+| Vendite | Annuari ufficializzati | scuole con l'annuario firmato, su quante lavorano l'annuario | Annuari |
 | Directory | Scuole raggiunte | in Directory, contro l'anno scorso alla stessa data | Metriche |
 | Directory | Scuole senza sales | da assegnare; ambra se ce n'è una segnalata per competitor | Directory |
 | Directory | Richieste dal form | da assegnare | Contatti senza scuola |
 | Hiring | Candidature da scrutinare | la coda di Lavora, e quante oggi | Lavora |
+| Hiring | Candidati RIS accettati | accettati e non ancora eletti | Tutte le candidature |
 | Hiring | Documenti da verificare | candidature con un documento in verifica | Tutte le candidature |
 | Hiring | Eletti senza documento | da contattare | Tutte le candidature |
 | Hiring | RIS eletti | col documento verificato | Metriche RIS |
-| Operativo | Avvisi della Dashboard | rossi e gialli, di tutte le regole | Dashboard |
+| Operativo | Le mie notifiche | le tue notifiche non lette (le stesse della campanella) e quante sono menzioni; un tasto «Avvisi» configurato prima diventa questo da solo | Dashboard |
 | Operativo | Job dell'outbox | falliti nell'ultima settimana e fermi; «ok» se niente | (rilegge) |
 | Operativo | PLAO da controllare | le firmate, da controllare prima dell'ultimo lunedì (o, se non ce n'è, quante sono da firmare) | Paghe |
 | Operativo | Ordini fornitori con un problema | in rosso se ce n'è uno | Ordini fornitori |

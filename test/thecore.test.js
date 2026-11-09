@@ -15,15 +15,17 @@ import {
 const RIASSUNTO = {
   versione: 1, at: "2026-11-09T10:00:00Z",
   stagione: { id: 2, codice: "2026-2027", nome: "Stagione 2026/2027", precedente: "2025-2026", sfasamentoGiorni: 365 },
-  vendite: { fatturato: 123_456.78, fatturatoOggi: 1_234.5, fatturatoAnnoScorso: 110_000, ordiniOggi: 12, ordiniIeri: 9, ordiniAnnoScorsoOggi: 7, ufficializzate: 40 },
+  vendite: { fatturato: 123_456.78, fatturatoOggi: 1_234.5, fatturatoAnnoScorso: 110_000, ordiniOggi: 12, ordiniIeri: 9, ordiniAnnoScorsoOggi: 7, ufficializzate: 40,
+    ufficializzateMerch: 31, ufficializzateAnnuari: 22, lineeMerch: 300, lineeAnnuari: 280 },
   directory: { raggiunte: 340, raggiunteAnnoScorso: 300, daAssegnare: 12, competitor: 2, richieste: 3 },
-  hiring: { daScrutinare: 5, arrivateOggi: 2, risEletti: 150, documentiDaVerificare: 4, elettiSenzaDocumento: 1 },
-  operativo: { avvisiRossi: 1, avvisiGialli: 6, jobFalliti: 0, jobInRitardo: 0, plaoFirmate: 3, plaoDaFirmare: 7, fornitoriProblema: 0 },
+  hiring: { daScrutinare: 5, arrivateOggi: 2, candidatiAccettati: 44, risEletti: 150, documentiDaVerificare: 4, elettiSenzaDocumento: 1 },
+  operativo: { jobFalliti: 0, jobInRitardo: 0, plaoFirmate: 3, plaoDaFirmare: 7, fornitoriProblema: 0 },
+  personale: { notificheNonLette: 6, menzioniNonLette: 2 },
 };
 
 // Le pagine di TheCore (frontend/src/app/routes.tsx e lib/nav/schede.ts).
 const PAGINE = new Set([
-  "/dashboard", "/directory", "/metriche", "/contatti-senza-scuola", "/ordini-fornitori",
+  "/dashboard", "/directory", "/metriche", "/contatti-senza-scuola", "/ordini-fornitori", "/l/merch", "/l/annuari",
   "/economics/pl", "/economics/dashboard-ordini", "/economics/paghe",
   "/ris/lavora", "/ris/candidature", "/ris/metriche",
 ]);
@@ -55,12 +57,22 @@ test("ogni metrica legge il riassunto e apre una pagina che esiste", () => {
   assert.equal(METRICHE.da_assegnare.vista(RIASSUNTO).tono, "attenzione");
   assert.equal(METRICHE.job.vista(RIASSUNTO).valore, "ok");
   assert.equal(METRICHE.job.vista({ ...RIASSUNTO, operativo: { ...RIASSUNTO.operativo, jobFalliti: 2, jobInRitardo: 1 } }).tono, "guasto");
-  assert.equal(METRICHE.avvisi.vista(RIASSUNTO).tono, "attenzione", "le scuole ferme sono lavoro, non un guasto");
+  assert.deepEqual(METRICHE.notifiche.vista(RIASSUNTO), { valore: "6", sub: "2 menzioni", tono: "attenzione" });
+  assert.deepEqual(METRICHE.notifiche.vista({ ...RIASSUNTO, personale: { notificheNonLette: 0, menzioniNonLette: 0 } }),
+    { valore: "0", sub: "non lette", tono: null });
+  // Un TheCore senza la 0157 non ha la parte personale: «--», non uno zero.
+  const { personale: _p, ...senzaPersonale } = RIASSUNTO;
+  assert.equal(METRICHE.notifiche.vista(senzaPersonale).valore, "--");
+  assert.deepEqual(METRICHE.ufficializzate_merch.vista(RIASSUNTO), { valore: "31", sub: "firmati su 300" });
+  assert.deepEqual(METRICHE.ufficializzate_annuari.vista(RIASSUNTO), { valore: "22", sub: "firmati su 280" });
+  assert.deepEqual(METRICHE.candidati_accettati.vista(RIASSUNTO), { valore: "44", sub: "non ancora eletti" });
   // senza anno scorso il confronto non si inventa
   const senza = { ...RIASSUNTO, stagione: { ...RIASSUNTO.stagione, precedente: null }, vendite: { ...RIASSUNTO.vendite, fatturatoAnnoScorso: null } };
   assert.equal(METRICHE.fatturato.vista(senza).sub, "oggi € 1.235", "1.234,5 si arrotonda all'euro");
   assert.equal(metricaDi({ metrica: "inesistente" }), METRICA_DEFAULT);
   assert.equal(metricaDi({ metrica: "__proto__" }), METRICA_DEFAULT);
+  // Un tasto configurato «Avvisi» prima del 09/11/2026 diventa «Notifiche» da solo.
+  assert.equal(metricaDi({ metrica: "avvisi" }), "notifiche");
 });
 
 test("il menu del pannello è lo stesso elenco del codice, nello stesso ordine", () => {

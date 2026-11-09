@@ -69,6 +69,16 @@ export const METRICHE = {
     gruppo: "Vendite", nome: "Scuole ufficializzate", titolo: "Firmate", glifo: "sigillo", pagina: "/directory",
     vista: (d) => ({ valore: numero(d.vendite.ufficializzate), sub: `su ${numero(d.directory.raggiunte)} raggiunte` }),
   },
+  // Le ufficializzate linea per linea (TheCore 0157): una scuola col merch firmato
+  // e l'annuario no conta in una sola delle due.
+  ufficializzate_merch: {
+    gruppo: "Vendite", nome: "Merch ufficializzati", titolo: "Merch", glifo: "maglietta", pagina: "/l/merch",
+    vista: (d) => ({ valore: numero(d.vendite.ufficializzateMerch), sub: `firmati su ${numero(d.vendite.lineeMerch)}` }),
+  },
+  ufficializzate_annuari: {
+    gruppo: "Vendite", nome: "Annuari ufficializzati", titolo: "Annuari", glifo: "libro", pagina: "/l/annuari",
+    vista: (d) => ({ valore: numero(d.vendite.ufficializzateAnnuari), sub: `firmati su ${numero(d.vendite.lineeAnnuari)}` }),
+  },
   // ------------------------------------------------------------- directory
   raggiunte: {
     gruppo: "Directory", nome: "Scuole raggiunte", titolo: "Raggiunte", glifo: "scuola", pagina: "/metriche",
@@ -101,6 +111,11 @@ export const METRICHE = {
       tono: d.hiring.daScrutinare > 0 ? "attenzione" : null,
     }),
   },
+  candidati_accettati: {
+    // Accettati e non ancora eletti (TheCore 0157): i candidati RIS degli inviti.
+    gruppo: "Hiring", nome: "Candidati RIS accettati", titolo: "Accettati", glifo: "utenteSpunta", pagina: "/ris/candidature",
+    vista: (d) => ({ valore: numero(d.hiring.candidatiAccettati), sub: "non ancora eletti" }),
+  },
   ris_documenti: {
     gruppo: "Hiring", nome: "Documenti da verificare", titolo: "Documenti", glifo: "documento", pagina: "/ris/candidature",
     vista: (d) => ({ valore: numero(d.hiring.documentiDaVerificare), sub: "da verificare", tono: d.hiring.documentiDaVerificare > 0 ? "attenzione" : null }),
@@ -114,12 +129,14 @@ export const METRICHE = {
     vista: (d) => ({ valore: numero(d.hiring.risEletti), sub: "eletti col documento" }),
   },
   // ------------------------------------------------------------- operativo
-  avvisi: {
-    gruppo: "Operativo", nome: "Avvisi della Dashboard", titolo: "Avvisi", glifo: "campana", pagina: "/dashboard",
+  notifiche: {
+    // Le TUE notifiche non lette (TheCore 0157): la chiave è personale, e la
+    // campanella è di chi la guarda. La cronologia sta nella Dashboard.
+    gruppo: "Operativo", nome: "Le mie notifiche", titolo: "Notifiche", glifo: "campana", pagina: "/dashboard",
     vista: (d) => {
-      const r = d.operativo.avvisiRossi, g = d.operativo.avvisiGialli;
-      // Gli avvisi sono scuole e persone ferme: lavoro da fare, non un guasto.
-      return { valore: numero(r), sub: `rossi · ${numero(g)} gialli`, tono: r > 0 ? "attenzione" : null };
+      const n = d.personale?.notificheNonLette, m = d.personale?.menzioniNonLette ?? 0;
+      if (typeof n !== "number") return { valore: "--", sub: "TheCore da aggiornare" };
+      return { valore: numero(n), sub: m > 0 ? conto(m, "menzione", "menzioni") : "non lette", tono: n > 0 ? "attenzione" : null };
     },
   },
   job: {
@@ -148,8 +165,12 @@ export const METRICHE = {
 };
 
 export const METRICA_DEFAULT = "fatturato";
+// Metriche che hanno cambiato nome: un tasto già configurato segue la nuova.
+// «avvisi» è diventato «notifiche» il 09/11/2026 («Avvisi → trasformalo in notifiche»).
+export const METRICHE_RINOMINATE = { avvisi: "notifiche" };
 export function metricaDi(settings) {
-  return Object.hasOwn(METRICHE, settings?.metrica) ? settings.metrica : METRICA_DEFAULT;
+  const m = METRICHE_RINOMINATE[settings?.metrica] ?? settings?.metrica;
+  return Object.hasOwn(METRICHE, m) ? m : METRICA_DEFAULT;
 }
 
 export function urlPagina(app, pagina) {
