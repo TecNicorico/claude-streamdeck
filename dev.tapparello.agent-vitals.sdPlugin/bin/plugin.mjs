@@ -6332,7 +6332,7 @@ function pickBucket(o) {
 var USAGE_DELAY_BASE = 12e4;
 var usageDelay = USAGE_DELAY_BASE;
 var lastUsageAttempt = 0;
-var CACHE_FILE = path3.join(PLUGIN_DIR, "usage-cache.json");
+var CACHE_FILE = path3.join(os.tmpdir(), "agent-vitals-usage-cache.json");
 try {
   const c = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
   if (Date.now() - c.at < 30 * 6e4) {

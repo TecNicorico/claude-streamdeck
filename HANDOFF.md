@@ -440,3 +440,9 @@ Guida utente: `DECK-REMOTO.md`, «La terza pagina». Per chi tocca il codice:
 - Solo i tasti TheCore hanno lo slot della riga in basso (`TASTI_CON_SLOT`): la Posta
   no, perché premuta apre Gmail e un tocco per leggere la posta non deve diventare
   un'approvazione.
+
+- **La cache dei consumi sta in `os.tmpdir()`** (`agent-vitals-usage-cache.json`), non
+  nella cartella del plugin: `deploy.ps1` la sostituisce intera, e la cache si perdeva a
+  ogni aggiornamento proprio quando serve — il primo giro dopo un'installazione prende
+  facilmente un 429 dall'endpoint dei consumi, e senza l'ultima lettura i tasti
+  restavano su «-- throttled» (09/11/2026).

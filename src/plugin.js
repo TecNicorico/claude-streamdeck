@@ -136,8 +136,12 @@ const USAGE_DELAY_BASE = 120_000;
 let usageDelay = USAGE_DELAY_BASE;
 let lastUsageAttempt = 0;
 
-// Survive restarts without re-polling: reuse the last good reading for up to 30 min
-const CACHE_FILE = path.join(PLUGIN_DIR, "usage-cache.json");
+// Survive restarts without re-polling: reuse the last good reading for up to 30 min.
+// Outside the plugin folder on purpose: deploy.ps1 / deploy.sh replace that folder,
+// so a cache kept there was wiped by every update — and the first poll after a
+// reinstall is exactly the one most likely to get a 429, leaving the gauges on
+// "-- throttled" with nothing to show (seen on-device 09/11/2026).
+const CACHE_FILE = path.join(os.tmpdir(), "agent-vitals-usage-cache.json");
 try {
   const c = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
   if (Date.now() - c.at < 30 * 60_000) { state.usage = c.usage; state.usageAt = c.at; }
