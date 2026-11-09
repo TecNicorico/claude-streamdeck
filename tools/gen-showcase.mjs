@@ -82,6 +82,13 @@ const ROWS = [
     ["outbox", K.thecoreKey({ glifo: "battito", gruppo: "Operativo", titolo: "Outbox", valore: "3", sub: "2 falliti · 1 fermo", tono: "guasto" })],
     ["fornitori", K.thecoreKey({ glifo: "camion", gruppo: "Operativo", titolo: "Fornitori", valore: "0", sub: "con un problema" })],
   ]],
+  ["Le luci di Smart Life — accesa la tessera è gialla e la barra dice quanto", [
+    ["accende e spegne", K.luceKey({ titolo: "Studio", breve: "Spegni", acceso: true, pct: 60, valore: "60%", sub: "tocca per spegnere" })],
+    ["spenta", K.luceKey({ titolo: "Studio", breve: "Accendi", acceso: false, pct: null, valore: "Spenta", sub: "tocca per accendere" })],
+    ["più luce", K.luceKey({ titolo: "LED scrivania", breve: "+20%", acceso: true, pct: 80, valore: "80%", sub: "+20%" })],
+    ["meno luce", K.luceKey({ titolo: "LED scrivania", breve: "−20%", acceso: true, pct: 40, valore: "40%", sub: "−20%" })],
+    ["offline", K.luceKey({ titolo: "Comodino", breve: "Luce", acceso: null, pct: null, valore: "--", sub: "offline", tono: "attenzione" })],
+  ]],
 ];
 
 const KEY = 144, GAP = 18, PAD = 34, CAPH = 22, HEADH = 34, ROWGAP = 30;

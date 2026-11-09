@@ -2270,7 +2270,7 @@ var require_websocket = __commonJS({
     var http = __require("http");
     var net = __require("net");
     var tls2 = __require("tls");
-    var { randomBytes: randomBytes2, createHash: createHash2 } = __require("crypto");
+    var { randomBytes: randomBytes2, createHash: createHash3 } = __require("crypto");
     var { Duplex, Readable } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -2938,7 +2938,7 @@ var require_websocket = __commonJS({
           abortHandshake(websocket, socket, "Invalid Upgrade header");
           return;
         }
-        const digest = createHash2("sha1").update(key + GUID).digest("base64");
+        const digest = createHash3("sha1").update(key + GUID).digest("base64");
         if (res.headers["sec-websocket-accept"] !== digest) {
           abortHandshake(websocket, socket, "Invalid Sec-WebSocket-Accept header");
           return;
@@ -3307,7 +3307,7 @@ var require_websocket_server = __commonJS({
     var EventEmitter = __require("events");
     var http = __require("http");
     var { Duplex } = __require("stream");
-    var { createHash: createHash2 } = __require("crypto");
+    var { createHash: createHash3 } = __require("crypto");
     var extension2 = require_extension();
     var PerMessageDeflate2 = require_permessage_deflate();
     var subprotocol2 = require_subprotocol();
@@ -3614,7 +3614,7 @@ var require_websocket_server = __commonJS({
           );
         }
         if (this._state > RUNNING) return abortHandshake(socket, 503);
-        const digest = createHash2("sha1").update(key + GUID).digest("base64");
+        const digest = createHash3("sha1").update(key + GUID).digest("base64");
         const headers = [
           "HTTP/1.1 101 Switching Protocols",
           "Upgrade: websocket",
@@ -4570,6 +4570,253 @@ async function principale() {
 }
 if (process.argv[1] && basename(process.argv[1]) === MARCA) principale();
 
+// src/luci.js
+import { createHash, createHmac } from "node:crypto";
+var HOST = {
+  eu: "openapi.tuyaeu.com",
+  // Europa centrale: di solito l'Italia
+  "eu-w": "openapi-weaz.tuyaeu.com",
+  // Europa occidentale
+  us: "openapi.tuyaus.com",
+  "us-e": "openapi-ueaz.tuyaus.com",
+  cn: "openapi.tuyacn.com",
+  in: "openapi.tuyain.com"
+};
+var REGIONI = Object.keys(HOST);
+var INTERVALLO_LUCI_MS = 6e4;
+var ELENCO_MS = 10 * 6e4;
+var RITARDO_ERRORE_LUCI_MS = 2 * 6e4;
+var RILETTURA_DOPO_MS = 1500;
+var sha256 = (s) => createHash("sha256").update(s ?? "", "utf8").digest("hex");
+function percorso(path4, query = {}) {
+  const chiavi = Object.keys(query ?? {}).filter((k) => query[k] != null && query[k] !== "").sort();
+  const firmato = chiavi.length ? `${path4}?${chiavi.map((k) => `${k}=${query[k]}`).join("&")}` : path4;
+  const chiamato = chiavi.length ? `${path4}?${chiavi.map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(query[k])}`).join("&")}` : path4;
+  return { firmato, chiamato };
+}
+function stringaDaFirmare(metodo, corpo, firmato) {
+  return [String(metodo).toUpperCase(), sha256(corpo ?? ""), "", firmato].join("\n");
+}
+function firma({ clientId, secret, token = "", t, metodo, corpo = "", firmato }) {
+  const s = String(clientId) + String(token ?? "") + String(t) + stringaDaFirmare(metodo, corpo, firmato);
+  return createHmac("sha256", String(secret)).update(s, "utf8").digest("hex").toUpperCase();
+}
+function confLuci(gs) {
+  const clientId = String(gs?.tuyaId ?? "").trim();
+  const secret = String(gs?.tuyaSecret ?? "").trim();
+  const regione = HOST[gs?.tuyaRegione] ? gs.tuyaRegione : "eu";
+  return { clientId, secret, regione, ok: !!(clientId && secret) };
+}
+var ErroreTuya = class extends Error {
+  constructor(messaggio, { codice = null, tipo = "server" } = {}) {
+    super(messaggio);
+    this.codice = codice;
+    this.tipo = tipo;
+  }
+};
+function tipoErrore(codice) {
+  const c = Number(codice);
+  if ([1004, 1005, 1100, 1101, 1106, 2009, 2017].includes(c) || String(codice).startsWith("2884")) return "chiave";
+  return "server";
+}
+var TuyaCloud = class {
+  constructor({ clientId, secret, regione = "eu", base: base2 = null, fetch: f = globalThis.fetch, ora: ora3 = Date.now } = {}) {
+    this.clientId = clientId;
+    this.secret = secret;
+    this.base = base2 ?? `https://${HOST[regione] ?? HOST.eu}`;
+    this.fetch = f;
+    this.ora = ora3;
+    this.token = null;
+    this.scade = 0;
+    this.scarto = 0;
+  }
+  t() {
+    return String(this.ora() + this.scarto);
+  }
+  async chiama(metodo, path4, { query, body, conToken = true } = {}) {
+    const corpo = body == null ? "" : JSON.stringify(body);
+    const { firmato, chiamato } = percorso(path4, query);
+    const t = this.t();
+    const token = conToken ? this.token : "";
+    const headers = {
+      client_id: this.clientId,
+      sign: firma({ clientId: this.clientId, secret: this.secret, token, t, metodo, corpo, firmato }),
+      t,
+      sign_method: "HMAC-SHA256"
+    };
+    if (conToken) headers.access_token = token;
+    if (corpo) headers["Content-Type"] = "application/json";
+    let res;
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 1e4);
+    try {
+      res = await this.fetch(`${this.base}${chiamato}`, { method: metodo, headers, ...corpo ? { body: corpo } : {}, signal: ac.signal });
+    } catch (e) {
+      throw new ErroreTuya(`rete: ${e?.message ?? e}`, { tipo: "rete" });
+    } finally {
+      clearTimeout(timer);
+    }
+    let j;
+    try {
+      j = await res.json();
+    } catch {
+      throw new ErroreTuya(`HTTP ${res.status}`, { tipo: res.status >= 500 ? "server" : "formato" });
+    }
+    if (typeof j?.t === "number" && Math.abs(j.t - this.ora() - this.scarto) > 6e4) this.scarto = j.t - this.ora();
+    return j;
+  }
+  async assicuraToken() {
+    if (this.token && this.ora() < this.scade - 6e4) return;
+    const j = await this.chiama("GET", "/v1.0/token", { query: { grant_type: 1 }, conToken: false });
+    if (!j?.success || !j.result?.access_token) {
+      throw new ErroreTuya(j?.msg || `token: codice ${j?.code}`, { codice: j?.code ?? null, tipo: tipoErrore(j?.code) });
+    }
+    this.token = j.result.access_token;
+    this.scade = this.ora() + Number(j.result.expire_time ?? 3600) * 1e3;
+  }
+  async richiesta(metodo, path4, opzioni = {}) {
+    await this.assicuraToken();
+    let j = await this.chiama(metodo, path4, opzioni);
+    if (!j?.success && (j?.code === 1010 || j?.code === 1011)) {
+      this.token = null;
+      await this.assicuraToken();
+      j = await this.chiama(metodo, path4, opzioni);
+    }
+    if (!j?.success) throw new ErroreTuya(j?.msg || `codice ${j?.code}`, { codice: j?.code ?? null, tipo: tipoErrore(j?.code) });
+    return j.result;
+  }
+  // I dispositivi dell'account Smart Life collegato al progetto, a pagine.
+  async dispositivi() {
+    const out = [];
+    let query = { size: 50 };
+    for (let pagina2 = 0; pagina2 < 10; pagina2++) {
+      const r = await this.richiesta("GET", "/v1.0/iot-01/associated-users/devices", { query });
+      for (const d of Array.isArray(r?.devices) ? r.devices : Array.isArray(r?.list) ? r.list : []) out.push(d);
+      if (!r?.has_more || !r?.last_row_key) break;
+      query = { size: 50, last_row_key: r.last_row_key };
+    }
+    return out.map(dispositivoDa).filter(Boolean);
+  }
+  specifica(id) {
+    return this.richiesta("GET", `/v1.0/iot-03/devices/${encodeURIComponent(id)}/specification`);
+  }
+  stato(id) {
+    return this.richiesta("GET", `/v1.0/iot-03/devices/${encodeURIComponent(id)}/status`);
+  }
+  comandi(id, commands) {
+    return this.richiesta("POST", `/v1.0/iot-03/devices/${encodeURIComponent(id)}/commands`, { body: { commands } });
+  }
+};
+function dispositivoDa(d) {
+  const id = String(d?.id ?? "").trim();
+  if (!id) return null;
+  return {
+    id,
+    nome: String(d?.name ?? d?.product_name ?? id).trim() || id,
+    categoria: String(d?.category ?? ""),
+    online: d?.online !== false,
+    status: Array.isArray(d?.status) ? d.status : null
+  };
+}
+var INTERRUTTORI = ["switch_led", "switch", "switch_1", "led_switch"];
+var LUMINOSITA = ["bright_value_v2", "bright_value", "bright_value_1", "bright"];
+var valoriDi = (f) => {
+  if (!f) return {};
+  if (typeof f.values === "object" && f.values) return f.values;
+  try {
+    return JSON.parse(f.values ?? "{}") ?? {};
+  } catch {
+    return {};
+  }
+};
+function capacitaDa(spec) {
+  const funzioni = Array.isArray(spec?.functions) ? spec.functions : [];
+  const per = (codici) => codici.map((c) => funzioni.find((f) => f?.code === c)).find(Boolean) ?? null;
+  const sw = per(INTERRUTTORI);
+  const br = per(LUMINOSITA);
+  let luminosita = null;
+  if (br) {
+    const v = valoriDi(br);
+    const min = Number.isFinite(Number(v.min)) ? Number(v.min) : 10;
+    const max = Number.isFinite(Number(v.max)) && Number(v.max) > min ? Number(v.max) : 1e3;
+    const step = Number(v.step) > 0 ? Number(v.step) : 1;
+    luminosita = { code: br.code, min, max, step };
+  }
+  return { interruttore: sw?.code ?? null, luminosita };
+}
+function pctDaValore(v, r) {
+  const n = Number(v);
+  if (!r || !Number.isFinite(n)) return null;
+  const p = (n - r.min) / (r.max - r.min) * 99 + 1;
+  return Math.max(1, Math.min(100, Math.round(p)));
+}
+function valoreDaPct(pct, r) {
+  const p = Math.max(1, Math.min(100, Number(pct) || 1));
+  const grezzo = r.min + (p - 1) / 99 * (r.max - r.min);
+  const sulPasso = r.min + Math.round((grezzo - r.min) / r.step) * r.step;
+  return Math.max(r.min, Math.min(r.max, sulPasso));
+}
+function statoDa(status, cap) {
+  if (!Array.isArray(status) || !cap) return null;
+  const di = (code) => status.find((s) => s?.code === code)?.value;
+  const acceso = cap.interruttore ? di(cap.interruttore) == null ? null : !!di(cap.interruttore) : null;
+  const pct = cap.luminosita ? pctDaValore(di(cap.luminosita.code), cap.luminosita) : null;
+  return { acceso, pct };
+}
+var AZIONI = ["interruttore", "piu", "meno", "livello"];
+var azioneDi = (settings) => AZIONI.includes(settings?.azione) ? settings.azione : "interruttore";
+var passoDi = (settings) => {
+  const n = Number(settings?.passo);
+  return Number.isFinite(n) && n >= 1 && n <= 100 ? Math.round(n) : 20;
+};
+var livelloDi = (settings) => {
+  const n = Number(settings?.livello);
+  return Number.isFinite(n) && n >= 1 && n <= 100 ? Math.round(n) : 50;
+};
+function comandiPer(settings, stato, cap) {
+  if (!cap) return null;
+  const azione = azioneDi(settings);
+  const acceso = stato?.acceso ?? null;
+  const pct = stato?.pct ?? null;
+  const sw = cap.interruttore, br = cap.luminosita;
+  if (azione === "interruttore") {
+    if (!sw) return null;
+    const nuovo = acceso === false;
+    return { commands: [{ code: sw, value: nuovo }], atteso: { acceso: nuovo, pct } };
+  }
+  if (!br) return null;
+  if (azione === "livello") {
+    const p2 = livelloDi(settings);
+    return { commands: [...sw ? [{ code: sw, value: true }] : [], { code: br.code, value: valoreDaPct(p2, br) }], atteso: { acceso: true, pct: p2 } };
+  }
+  const passo = passoDi(settings);
+  const base2 = pct ?? 50;
+  if (azione === "piu") {
+    const p2 = acceso === false ? Math.max(base2, passo) : Math.min(100, base2 + passo);
+    return { commands: [...sw && acceso !== true ? [{ code: sw, value: true }] : [], { code: br.code, value: valoreDaPct(p2, br) }], atteso: { acceso: true, pct: p2 } };
+  }
+  const p = Math.max(1, base2 - passo);
+  return { commands: [{ code: br.code, value: valoreDaPct(p, br) }], atteso: { acceso, pct: p } };
+}
+function vistaLuce({ settings = {}, dispositivo = null, rec = null, conf = { ok: false }, cap = null }) {
+  const azione = azioneDi(settings);
+  const nome = String(settings.label ?? "").trim() || dispositivo?.nome || "Luce";
+  const sotto2 = azione === "piu" ? `+${passoDi(settings)}%` : azione === "meno" ? `\u2212${passoDi(settings)}%` : azione === "livello" ? `al ${livelloDi(settings)}%` : null;
+  const base2 = { azione, titolo: nome, breve: sotto2 ?? "Luce", acceso: null, valore: "--", sub: "", tono: null };
+  if (!conf.ok) return { ...base2, sub: "chiavi Tuya?", tono: "attenzione" };
+  if (!settings.dispositivo) return { ...base2, sub: "scegli la luce" };
+  if (rec?.errTipo === "chiave") return { ...base2, valore: "!", sub: "chiavi Tuya?", tono: "guasto" };
+  if (dispositivo && dispositivo.online === false) return { ...base2, sub: "offline", tono: "attenzione" };
+  const st = rec?.stato ?? null;
+  if (!st) return { ...base2, sub: rec?.err ? "non risponde" : "\u2026", tono: rec?.err ? "attenzione" : null };
+  const acceso = st.acceso;
+  const valore = acceso === false ? "Spenta" : st.pct != null ? `${st.pct}%` : acceso ? "Accesa" : "--";
+  const sub = sotto2 ?? (acceso === false ? "tocca per accendere" : acceso ? "tocca per spegnere" : "");
+  const noCap = cap && (azione === "interruttore" && !cap.interruttore || azione !== "interruttore" && !cap.luminosita);
+  const breve = sotto2 ?? (acceso === false ? "Accendi" : acceso ? "Spegni" : "Luce");
+  return { ...base2, breve, acceso, pct: acceso === false ? null : st.pct, valore, sub: noCap ? "non regolabile" : rec?.err ? "offline" : sub, tono: rec?.err || noCap ? "attenzione" : null };
+}
+
 // src/sonda.js
 var SONDA_MS = 10 * 6e4;
 var SONDA_TIMEOUT_MS = 6e4;
@@ -5149,7 +5396,7 @@ function statusEntry(resolved, cycleIdx = null) {
 }
 
 // src/plugin.js
-import { randomBytes, createHash } from "node:crypto";
+import { randomBytes, createHash as createHash2 } from "node:crypto";
 
 // src/imap.js
 import tls from "node:tls";
@@ -6191,7 +6438,9 @@ var C = {
     // (OKLCH L 0.76, C 0.055), nei due buchi più larghi della ruota — 275° fra custom
     // (249°) e chat (302°), 122° fra project (93°) e code (152°). 8.4:1 e 8.6:1 sul fondo.
     posta: "#a6afd5",
-    thecore: "#abb790"
+    thecore: "#abb790",
+    // Il tasto Luce: nel buco più largo che restava, 40° fra prompt (16°) e launch (63°).
+    luce: "#d1a697"
   },
   ok: D.tessera.Vendite,
   // #23a55a, «online»
@@ -6305,6 +6554,11 @@ var ICONE = {
     ["p", "M9.6 18.9 A2.4 2.4 0 0 0 14.4 18.9 Z"]
   ],
   battito: [["l", "M2.4 12.4 H6.6 L9 6.2 L13.6 18.6 L16.2 12.4 H21.6"]],
+  lampadina: [
+    ["p", "M12 2.4 C8.1 2.4 5.1 5.4 5.1 9.2 C5.1 11.6 6.3 13.5 7.9 14.8 C8.6 15.4 9 16.1 9 16.9 V17.4 H15 V16.9 C15 16.1 15.4 15.4 16.1 14.8 C17.7 13.5 18.9 11.6 18.9 9.2 C18.9 5.4 15.9 2.4 12 2.4 Z"],
+    ["l", "M9.4 19.6 H14.6"],
+    ["l", "M10.4 21.9 H13.6"]
+  ],
   penna: [["p", "M16.1 3.6 L20.4 7.9 L9.8 18.5 L4.4 19.6 L5.5 14.2 Z"], ["t", "M14.2 5.5 L18.5 9.8"], ["l", "M12.6 21 H21"]],
   camion: [
     ["p", "M3.6 6.2 H14.6 V16.4 H2.4 V7.4 A1.2 1.2 0 0 1 3.6 6.2 Z"],
@@ -6609,6 +6863,27 @@ function thecoreKey(v) {
     ${line(52, 33, 86, 16, 700, D.testo, v.titolo, "start")}
     ${line(72, 92, 126, 46, 800, numCol, valore, "middle", "", 20)}
     ${line(72, 126, 130, 15, 500, tono ?? (v.attenuato ? D.spento : D.tenue), v.sub)}`);
+}
+function luceKey(v) {
+  const acceso = v.acceso === true;
+  const tessera = acceso ? D.giallo : TESSERA_SPENTA;
+  const ink = acceso ? "#1e1f22" : v.acceso === false ? D.tenue : "#ffffff";
+  const tono = TONO_D[v.tono] ?? null;
+  const valore = String(v.valore);
+  const numCol = valore === "!" ? D.rosso : acceso ? D.testo : D.spento;
+  const pct = acceso && Number.isFinite(v.pct) ? Math.max(0, Math.min(100, v.pct)) : null;
+  const nomeInTesta = fits(String(v.titolo), 88, 13) || !!tono;
+  const testa = nomeInTesta ? v.titolo : v.breve || v.titolo;
+  const piede = nomeInTesta ? v.sub : v.titolo;
+  const barra = pct == null ? "" : `<rect x="14" y="101" width="116" height="8" rx="4" fill="#1e1f22"/><rect x="14" y="101" width="${Math.max(8, Math.round(116 * pct / 100))}" height="8" rx="4" fill="${D.giallo}"/>`;
+  return svgDiscord(`
+    <rect x="12" y="11" width="32" height="32" rx="10" fill="${tessera}"/>
+    ${icona("lampadina", 16, 15, 24, ink, tessera)}
+    ${tono ? pallino(42, 13, tono) : ""}
+    ${line(52, 33, 88, 16, 700, D.testo, testa, "start", "", 11)}
+    ${line(72, pct == null ? 92 : 88, 126, pct == null ? 40 : 36, 800, numCol, valore, "middle", "", 18)}
+    ${barra}
+    ${line(72, 126, 130, 15, 500, tono ?? D.tenue, piede)}`);
 }
 var APPROVE_LOOK = {
   "approve-allow": { word: "ALLOW", col: C.ok, icona: "allow", forma: "tondo" },
@@ -7164,6 +7439,18 @@ function viewFor(kind, env) {
       const v = vistaTheCore({ settings, tc: state2.thecore, conf: confTheCore(state2.globalSettings) });
       return img(thecoreKey(v));
     }
+    case "luce": {
+      const id = settings.dispositivo;
+      const l = state2.luci ?? {};
+      const v = vistaLuce({
+        settings,
+        conf: confLuci(state2.globalSettings),
+        dispositivo: id ? l.dispositivi?.get?.(id) ?? null : null,
+        rec: id ? l.rec?.get?.(id) ?? (l.errTipo ? { errTipo: l.errTipo, err: l.err } : null) : null,
+        cap: id ? l.cap?.get?.(id) ?? null : null
+      });
+      return img(luceKey(v));
+    }
     case "approve-allow":
     case "approve-always":
     case "approve-deny":
@@ -7310,6 +7597,10 @@ var state = {
   // (src/posta.js); thecore: { dati, at, okAt, err } (src/thecore.js).
   posta: /* @__PURE__ */ new Map(),
   thecore: null,
+  // Le luci di Smart Life (src/luci.js): l'elenco dell'account, cosa sa fare ognuna, e
+  // per ognuna { stato:{acceso,pct}, at, err, errTipo }. errTipo/err in cima: un errore
+  // che riguarda tutte (le chiavi).
+  luci: { dispositivi: /* @__PURE__ */ new Map(), elencoAt: 0, cap: /* @__PURE__ */ new Map(), rec: /* @__PURE__ */ new Map(), err: null, errTipo: null, erroreAt: 0 },
   lastHeadChangeAt: 0,
   globalSettings: {},
   pluginUUID: null
@@ -8435,6 +8726,8 @@ function onKeyDown(context, kind) {
       setTimeout(() => pollPosta({ subito: chiave }), 45e3);
       return act(context, platform.openUrl(urlGmail(email)));
     }
+    case "luce":
+      return premiLuce(context);
     case "thecore": {
       const m = METRICHE[metricaDi(views.get(context)?.settings)];
       if (!m.pagina) {
@@ -8707,7 +9000,7 @@ async function inviaDecisione(id, decisione) {
   programmaRelay(300);
 }
 var postaInCorso = /* @__PURE__ */ new Set();
-var impronta = (s) => createHash("sha256").update(String(s)).digest("hex").slice(0, 16);
+var impronta = (s) => createHash2("sha256").update(String(s)).digest("hex").slice(0, 16);
 async function pollPosta({ subito = null } = {}) {
   const now = Date.now();
   const lavori = caselleDaLeggere(views.values(), state.globalSettings).filter((c) => {
@@ -8756,9 +9049,9 @@ async function pollTheCore(forza = false) {
     }
     return;
   }
-  const firma = conf.url + "|" + impronta(conf.chiave);
-  if (firma !== thecoreFirma) {
-    thecoreFirma = firma;
+  const firma2 = conf.url + "|" + impronta(conf.chiave);
+  if (firma2 !== thecoreFirma) {
+    thecoreFirma = firma2;
     state.thecore = null;
     forza = true;
   }
@@ -8779,6 +9072,128 @@ async function pollTheCore(forza = false) {
     thecoreInCorso = false;
   }
   renderAll(["thecore"]);
+}
+var tuya = null;
+var tuyaFirma = "";
+var luciInCorso = false;
+function clientTuya() {
+  const conf = confLuci(state.globalSettings);
+  if (!conf.ok) {
+    tuya = null;
+    tuyaFirma = "";
+    return null;
+  }
+  const firma2 = `${conf.clientId}|${impronta(conf.secret)}|${conf.regione}`;
+  if (firma2 !== tuyaFirma) {
+    tuyaFirma = firma2;
+    tuya = new TuyaCloud({ ...conf, base: process.env.AGENT_VITALS_TUYA_BASE || null });
+    state.luci = { dispositivi: /* @__PURE__ */ new Map(), elencoAt: 0, cap: /* @__PURE__ */ new Map(), rec: /* @__PURE__ */ new Map(), err: null, errTipo: null, erroreAt: 0 };
+  }
+  return tuya;
+}
+var idLuciVisibili = () => new Set([...views.values()].filter((v) => v.kind === "luce" && v.settings?.dispositivo).map((v) => String(v.settings.dispositivo)));
+function erroreLuci(e) {
+  const tipo = e?.tipo ?? "rete";
+  const msg = String(e?.message ?? e);
+  if (state.luci.err !== msg) log(`luci: ${tipo}: ${msg}`);
+  return { tipo, msg };
+}
+async function capDi(c, id) {
+  if (!state.luci.cap.has(id)) state.luci.cap.set(id, capacitaDa(await c.specifica(id)));
+  return state.luci.cap.get(id);
+}
+async function pollLuci({ forza = false, elenco = false, solo = null } = {}) {
+  const c = clientTuya();
+  const ids = solo ? /* @__PURE__ */ new Set([solo]) : idLuciVisibili();
+  if (!c) {
+    renderAll(["luce"]);
+    return;
+  }
+  if (!forza && !elenco && !ids.size && ![...views.values()].some((v) => v.kind === "luce")) return;
+  if (luciInCorso) return;
+  const L = state.luci;
+  if (!forza && L.erroreAt && Date.now() - L.erroreAt < RITARDO_ERRORE_LUCI_MS) return;
+  luciInCorso = true;
+  try {
+    if (elenco || !L.elencoAt || Date.now() - L.elencoAt > ELENCO_MS) {
+      const lista = await c.dispositivi();
+      L.dispositivi = new Map(lista.map((d) => [d.id, d]));
+      L.elencoAt = Date.now();
+      for (const d of lista) {
+        if (!d.status || !ids.has(d.id)) continue;
+        const st = statoDa(d.status, await capDi(c, d.id));
+        if (st) L.rec.set(d.id, { stato: st, at: Date.now(), err: null, errTipo: null });
+      }
+    }
+    for (const id of ids) {
+      const r = L.rec.get(id);
+      if (!forza && r?.at && Date.now() - r.at < INTERVALLO_LUCI_MS) continue;
+      try {
+        const st = statoDa(await c.stato(id), await capDi(c, id));
+        L.rec.set(id, { stato: st, at: Date.now(), err: null, errTipo: null });
+      } catch (e) {
+        const { tipo, msg } = erroreLuci(e);
+        if (tipo === "chiave") throw e;
+        L.rec.set(id, { stato: r?.stato ?? null, at: Date.now(), err: msg, errTipo: tipo });
+      }
+    }
+    L.err = null;
+    L.errTipo = null;
+    L.erroreAt = 0;
+  } catch (e) {
+    const { tipo, msg } = erroreLuci(e);
+    L.err = msg;
+    L.errTipo = tipo;
+    L.erroreAt = Date.now();
+    if (tipo === "chiave") for (const id of ids) L.rec.set(id, { stato: null, at: Date.now(), err: msg, errTipo: tipo });
+  } finally {
+    luciInCorso = false;
+  }
+  renderAll(["luce"]);
+}
+var filaLuce = /* @__PURE__ */ new Map();
+function premiLuce(context) {
+  const settings = views.get(context)?.settings ?? {};
+  const id = settings.dispositivo ? String(settings.dispositivo) : null;
+  const c = clientTuya();
+  if (!c || !id) return showAlert(context);
+  const prima = filaLuce.get(id) ?? Promise.resolve();
+  const giro = prima.then(async () => {
+    const L = state.luci;
+    try {
+      const cap = await capDi(c, id);
+      const rec = L.rec.get(id);
+      const piano = comandiPer(settings, rec?.stato ?? null, cap);
+      if (!piano) {
+        showAlert(context);
+        return;
+      }
+      L.rec.set(id, { ...rec ?? {}, stato: piano.atteso, at: Date.now(), err: null, errTipo: null });
+      renderAll(["luce"]);
+      await c.comandi(id, piano.commands);
+      setTimeout(() => pollLuci({ forza: true, solo: id }), RILETTURA_DOPO_MS);
+    } catch (e) {
+      const { tipo, msg } = erroreLuci(e);
+      L.rec.set(id, { stato: L.rec.get(id)?.stato ?? null, at: Date.now(), err: msg, errTipo: tipo });
+      showAlert(context);
+      renderAll(["luce"]);
+      setTimeout(() => pollLuci({ forza: true, solo: id }), RILETTURA_DOPO_MS);
+    }
+  });
+  filaLuce.set(id, giro.finally(() => {
+    if (filaLuce.get(id) === giro) filaLuce.delete(id);
+  }));
+}
+function luciPerPI() {
+  const conf = confLuci(state.globalSettings);
+  const L = state.luci;
+  return {
+    ok: conf.ok,
+    regione: conf.regione,
+    err: L.err,
+    errTipo: L.errTipo,
+    dispositivi: [...L.dispositivi.values()].map((d) => ({ id: d.id, nome: d.nome, online: d.online, categoria: d.categoria })).sort((a, b) => a.nome.localeCompare(b.nome, "it"))
+  };
 }
 if (process.argv.includes("--selftest")) {
   (async () => {
@@ -8894,6 +9309,7 @@ if (process.argv.includes("--selftest")) {
       if (GAUGE_WINDOW[kindOf(action)]) setTimeout(() => pollSonda(), 1500);
       if (kindOf(action) === "posta") pollPosta();
       if (kindOf(action) === "thecore") pollTheCore();
+      if (kindOf(action) === "luce") setTimeout(() => pollLuci(), 300);
     } else if (event === "willDisappear") {
       const wasApproveKey = faDaApprovazione(views.get(context));
       views.delete(context);
@@ -8917,6 +9333,7 @@ if (process.argv.includes("--selftest")) {
         render(context, v.kind);
         if (v.kind === "usage-meter" || GAUGE_WINDOW[v.kind]) pollUsageMeter();
         if (v.kind === "posta") pollPosta();
+        if (v.kind === "luce") pollLuci();
       }
     } else if (event === "didReceiveGlobalSettings") {
       state.globalSettings = msg.payload?.settings ?? {};
@@ -8925,7 +9342,8 @@ if (process.argv.includes("--selftest")) {
       ensureHookServer();
       programmaRelay(200);
       renderApproveAll();
-      renderAll(["posta", "thecore"]);
+      renderAll(["posta", "thecore", "luce"]);
+      if (clientTuya()) pollLuci({ elenco: !state.luci.elencoAt });
       pollPosta();
       pollTheCore();
     } else if (event === "sendToPlugin" && action) {
@@ -8939,6 +9357,11 @@ if (process.argv.includes("--selftest")) {
         send({ event: "sendToPropertyInspector", context, payload: {
           posta: statoPosta({ settings, rec, haPassword: !!passwordDi(state.globalSettings, email) })
         } });
+      }
+      if (msg.payload?.cmd === "getLuci") {
+        const rispondi2 = () => send({ event: "sendToPropertyInspector", context, payload: { luci: luciPerPI() } });
+        rispondi2();
+        if (clientTuya()) pollLuci({ elenco: !!msg.payload?.aggiorna || !state.luci.elencoAt, forza: !!msg.payload?.aggiorna }).then(rispondi2, rispondi2);
       }
       if (msg.payload?.cmd === "getTheCore") {
         send({ event: "sendToPropertyInspector", context, payload: {
@@ -8975,6 +9398,7 @@ if (process.argv.includes("--selftest")) {
   setInterval(pollUsageMeter, 6e4);
   setInterval(pollPosta, 15e3);
   setInterval(pollTheCore, 3e4);
+  setInterval(pollLuci, 15e3);
   setInterval(() => {
     animPhase = (animPhase + 1) % 3;
     const kinds = [];

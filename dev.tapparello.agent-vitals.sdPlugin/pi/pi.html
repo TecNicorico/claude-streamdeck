@@ -104,6 +104,19 @@ const FIELDS = {
     ] },
     { key: "label", type: "text", label: "Etichetta (vuoto = la parte prima della @)" },
   ],
+  // Le luci di Smart Life (src/luci.js).
+  "dev.tapparello.agent-vitals.luce": [
+    { key: "dispositivo", type: "luceselect", label: "La luce" },
+    { key: "azione", type: "select", label: "Premuto", default: "interruttore", options: [
+      { value: "interruttore", label: "Accende e spegne" },
+      { value: "piu", label: "Più luce" },
+      { value: "meno", label: "Meno luce" },
+      { value: "livello", label: "Accende a una percentuale" },
+    ] },
+    { key: "passo", type: "number", label: "Di quanto, in % (per Più e Meno; vuoto = 20)" },
+    { key: "livello", type: "number", label: "A che percentuale (per «Accende a una percentuale»; vuoto = 50)" },
+    { key: "label", type: "text", label: "Nome sul tasto (vuoto = quello di Smart Life)" },
+  ],
   "dev.tapparello.agent-vitals.thecore": [
     { key: "metrica", type: "metrica", label: "Che numero mostra" },
     SLOT_FIELD,
@@ -192,6 +205,40 @@ function build() {
       err.style.cssText = "font-size:11px;color:#f87171;margin-top:4px;display:none";
       div.append(lab, ta, btn, note, err);
       ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd: "getInstall" } }));
+    } else if (f.type === "luceselect") {
+      const l = document.createElement("label");
+      l.textContent = f.label;
+      const sel = document.createElement("select");
+      sel.id = "luceSelect";
+      const riempi = () => {
+        const cur = settings[f.key] ?? "";
+        sel.innerHTML = "";
+        const vuota = document.createElement("option");
+        vuota.value = "";
+        vuota.textContent = !luciInfo ? "caricamento…" : !luciInfo.ok ? "prima le chiavi Tuya, qui sotto" : luciInfo.dispositivi.length ? "scegli…" : "nessuna luce trovata";
+        sel.append(vuota);
+        for (const d of luciInfo?.dispositivi ?? []) {
+          const o = document.createElement("option");
+          o.value = d.id;
+          o.textContent = d.nome + (d.online === false ? " (offline)" : "");
+          sel.append(o);
+        }
+        // Una luce scelta prima e non più nell'elenco resta scelta, col suo id.
+        if (cur && ![...sel.options].some((o) => o.value === cur)) {
+          const o = document.createElement("option");
+          o.value = cur; o.textContent = cur + " (non trovata)";
+          sel.append(o);
+        }
+        sel.value = cur;
+      };
+      riempi();
+      sel.onchange = () => { settings[f.key] = sel.value; save(); };
+      const btn = document.createElement("button");
+      btn.textContent = "Aggiorna l'elenco";
+      btn.onclick = () => { btn.textContent = "…"; askLuci(true); setTimeout(() => (btn.textContent = "Aggiorna l'elenco"), 2500); };
+      div.append(l, sel, btn);
+      luciRiempi = riempi;
+      askLuci(false);
     } else if (f.type === "letture") {
       const l = document.createElement("label");
       l.className = "chk";
@@ -330,6 +377,7 @@ function build() {
   if (action === "dev.tapparello.agent-vitals.usage-meter") buildRates();
   if (RELAY_ACTIONS.includes(action)) buildRelay();
   if (action === THECORE_ACTION) buildTheCore();
+  if (action === LUCE_ACTION) buildLuci();
   if (action === POSTA_ACTION) {
     // Cambiato l'indirizzo, il campo della password è di un'altra casella.
     const em = [...document.querySelectorAll("#form input[type=text]")][0];
@@ -339,7 +387,58 @@ function build() {
 }
 const POSTA_ACTION = "dev.tapparello.agent-vitals.posta";
 const THECORE_ACTION = "dev.tapparello.agent-vitals.thecore";
-const GS_ACTIONS = ["dev.tapparello.agent-vitals.usage-meter", "dev.tapparello.agent-vitals.usage-model", POSTA_ACTION, THECORE_ACTION];
+const LUCE_ACTION = "dev.tapparello.agent-vitals.luce";
+const GS_ACTIONS = ["dev.tapparello.agent-vitals.usage-meter", "dev.tapparello.agent-vitals.usage-model", POSTA_ACTION, THECORE_ACTION, LUCE_ACTION];
+// Le luci: le chiavi del progetto Tuya, condivise da tutti i tasti Luce.
+let luciInfo = null, luciRiempi = null;
+function askLuci(aggiorna) { if (ws && action === LUCE_ACTION) ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd: "getLuci", aggiorna } })); }
+const LUCI_FIELDS = [
+  { key: "tuyaId", label: "Access ID (Client ID) del progetto Tuya", type: "text" },
+  { key: "tuyaSecret", label: "Access Secret (Client Secret)", type: "password" },
+];
+const REGIONI_TUYA = [["eu", "Europa centrale"], ["eu-w", "Europa occidentale"], ["us", "America occidentale"], ["us-e", "America orientale"], ["cn", "Cina"], ["in", "India"]];
+function buildLuci() {
+  let box = document.getElementById("luci");
+  if (!box) { box = document.createElement("div"); box.id = "luci"; document.getElementById("form").append(box); }
+  box.innerHTML = "";
+  const h = document.createElement("div"); h.className = "rateshead"; h.textContent = "Smart Life (Tuya) — condivise"; box.append(h);
+  const salva = () => { ws.send(JSON.stringify({ event: "setGlobalSettings", context: piUuid, payload: gs })); setTimeout(() => askLuci(true), 1500); };
+  for (const f of LUCI_FIELDS) {
+    const div = document.createElement("div"); div.className = "item";
+    const l = document.createElement("label"); l.textContent = f.label;
+    const i = document.createElement("input"); i.type = f.type; i.autocomplete = "off"; i.spellcheck = false;
+    i.value = gs[f.key] ?? "";
+    i.onchange = () => {
+      if (!gsReady) return;
+      const v = i.value.trim();
+      if (v) gs[f.key] = v; else delete gs[f.key];
+      salva();
+    };
+    div.append(l, i);
+    box.append(div);
+  }
+  const div = document.createElement("div"); div.className = "item";
+  const l = document.createElement("label"); l.textContent = "Data center (quello scelto creando il progetto)";
+  const sel = document.createElement("select");
+  for (const [v, t] of REGIONI_TUYA) { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.append(o); }
+  sel.value = gs.tuyaRegione ?? "eu";
+  sel.onchange = () => { if (!gsReady) return; gs.tuyaRegione = sel.value; salva(); };
+  div.append(l, sel);
+  box.append(div);
+  const st = document.createElement("div"); st.className = "cap"; st.id = "luciState";
+  st.textContent = statoLuci();
+  box.append(st);
+  const cap = document.createElement("div"); cap.className = "cap";
+  cap.textContent = "Le chiavi vengono dal progetto sviluppatore di Tuya collegato all'app Smart Life (DECK-REMOTO.md, «Le luci di Smart Life»). Il Secret comanda le tue luci: trattalo come una password.";
+  box.append(cap);
+}
+function statoLuci() {
+  if (!luciInfo) return "";
+  if (!luciInfo.ok) return "Mancano le chiavi.";
+  if (luciInfo.errTipo === "chiave") return `Tuya rifiuta le chiavi: ${luciInfo.err}`;
+  if (luciInfo.err) return `Tuya non risponde: ${luciInfo.err}`;
+  return `Collegato · ${luciInfo.dispositivi.length} dispositivi`;
+}
 function askPosta() { if (ws && action === POSTA_ACTION) ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd: "getPosta" } })); }
 function askTheCore() { ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd: "getTheCore" } })); }
 // TheCore: impostazioni condivise da tutti i tasti TheCore (global settings), come
@@ -478,7 +577,14 @@ function connectElgatoStreamDeckSocket(port, uuid, evt, info, actionInfo) {
       if (RELAY_ACTIONS.includes(action)) buildRelay();
       if (action === POSTA_ACTION) build();
       if (action === THECORE_ACTION) buildTheCore();
+      if (action === LUCE_ACTION) buildLuci();
       return;
+    }
+    if (m.event === "sendToPropertyInspector" && m.payload?.luci) {
+      luciInfo = m.payload.luci;
+      if (luciRiempi) luciRiempi();
+      const st = document.getElementById("luciState");
+      if (st) st.textContent = statoLuci();
     }
     if (m.event === "sendToPropertyInspector" && typeof m.payload?.posta === "string") {
       const st = document.getElementById("postaState");

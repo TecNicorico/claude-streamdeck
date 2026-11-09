@@ -77,6 +77,8 @@ const C = {
     // (OKLCH L 0.76, C 0.055), nei due buchi più larghi della ruota — 275° fra custom
     // (249°) e chat (302°), 122° fra project (93°) e code (152°). 8.4:1 e 8.6:1 sul fondo.
     posta: "#a6afd5", thecore: "#abb790",
+    // Il tasto Luce: nel buco più largo che restava, 40° fra prompt (16°) e launch (63°).
+    luce: "#d1a697",
   },
   ok: D.tessera.Vendite, // #23a55a, «online»
   warn: D.giallo,
@@ -181,6 +183,7 @@ const GLYPHS = {
   // La terza pagina: la posta e il gruppo di TheCore, per le stesse due superfici.
   posta: ["M3.5 6 h17 v12 h-17 z", "M3.5 6.5 L12 13 L20.5 6.5"],
   scuola: ["M3 10 L12 4.5 L21 10", "M5 10 v9", "M19 10 v9", "M3 19.5 h18", "M10 19.5 v-5 h4 v5"],
+  lampadina: ["M12 3 a6.5 6.5 0 0 0 -3.8 11.8 c0.6 0.5 0.8 1.1 0.8 1.7 v1 h6 v-1 c0 -0.6 0.2 -1.2 0.8 -1.7 A6.5 6.5 0 0 0 12 3 z", "M9.5 20.5 h5"],
 };
 
 // A standalone 72x72 icon for the Stream Deck action list, drawn from the same glyph
@@ -264,6 +267,8 @@ const ICONE = {
   campana: [["p", "M12 2.8 C8.5 2.8 6.2 5.4 6.2 9.1 V12.9 L4.4 16 V17.4 H19.6 V16 L17.8 12.9 V9.1 C17.8 5.4 15.5 2.8 12 2.8 Z"],
     ["p", "M9.6 18.9 A2.4 2.4 0 0 0 14.4 18.9 Z"]],
   battito: [["l", "M2.4 12.4 H6.6 L9 6.2 L13.6 18.6 L16.2 12.4 H21.6"]],
+  lampadina: [["p", "M12 2.4 C8.1 2.4 5.1 5.4 5.1 9.2 C5.1 11.6 6.3 13.5 7.9 14.8 C8.6 15.4 9 16.1 9 16.9 V17.4 H15 V16.9 C15 16.1 15.4 15.4 16.1 14.8 C17.7 13.5 18.9 11.6 18.9 9.2 C18.9 5.4 15.9 2.4 12 2.4 Z"],
+    ["l", "M9.4 19.6 H14.6"], ["l", "M10.4 21.9 H13.6"]],
   penna: [["p", "M16.1 3.6 L20.4 7.9 L9.8 18.5 L4.4 19.6 L5.5 14.2 Z"], ["t", "M14.2 5.5 L18.5 9.8"], ["l", "M12.6 21 H21"]],
   camion: [["p", "M3.6 6.2 H14.6 V16.4 H2.4 V7.4 A1.2 1.2 0 0 1 3.6 6.2 Z"], ["p", "M15.6 9.2 H18.7 L21.6 12.6 V16.4 H15.6 Z"],
     ["b", cerchio(7, 17.4, 2.3)], ["b", cerchio(17.6, 17.4, 2.3)]],
@@ -657,6 +662,36 @@ function thecoreKey(v) {
     ${line(72, 126, 130, 15, 500, tono ?? (v.attenuato ? D.spento : D.tenue), v.sub)}`);
 }
 
+// Una luce di Smart Life: la tessera gialla con la lampadina scura se è accesa, grigia
+// se è spenta; il nome, la percentuale grande e, accesa, la barra della luminosità.
+// `v` è vistaLuce(...) di src/luci.js.
+function luceKey(v) {
+  const acceso = v.acceso === true;
+  const tessera = acceso ? D.giallo : TESSERA_SPENTA;
+  const ink = acceso ? "#1e1f22" : v.acceso === false ? D.tenue : "#ffffff";
+  const tono = TONO_D[v.tono] ?? null;
+  const valore = String(v.valore);
+  const numCol = valore === "!" ? D.rosso : acceso ? D.testo : D.spento;
+  const pct = acceso && Number.isFinite(v.pct) ? Math.max(0, Math.min(100, v.pct)) : null;
+  // Il nome in testa se ci sta a 13 px; se no in testa va il gesto breve («Spegni»,
+  // «+20%») e il nome scende nella riga sotto, che è larga il doppio. Un problema
+  // (offline, le chiavi) resta sotto: lì si legge, e il nome si stringe in testa.
+  const nomeInTesta = fits(String(v.titolo), 88, 13) || !!tono;
+  const testa = nomeInTesta ? v.titolo : (v.breve || v.titolo);
+  const piede = nomeInTesta ? v.sub : v.titolo;
+  const barra = pct == null ? "" :
+    `<rect x="14" y="101" width="116" height="8" rx="4" fill="#1e1f22"/>` +
+    `<rect x="14" y="101" width="${Math.max(8, Math.round(116 * pct / 100))}" height="8" rx="4" fill="${D.giallo}"/>`;
+  return svgDiscord(`
+    <rect x="12" y="11" width="32" height="32" rx="10" fill="${tessera}"/>
+    ${icona("lampadina", 16, 15, 24, ink, tessera)}
+    ${tono ? pallino(42, 13, tono) : ""}
+    ${line(52, 33, 88, 16, 700, D.testo, testa, "start", "", 11)}
+    ${line(72, pct == null ? 92 : 88, 126, pct == null ? 40 : 36, 800, numCol, valore, "middle", "", 18)}
+    ${barra}
+    ${line(72, 126, 130, 15, 500, tono ?? D.tenue, piede)}`);
+}
+
 // ================= IL VECCHIO ALLOW / ALWAYS / DENY =================
 // Nessuna pressione lo disegna più (la riga in basso è decisioneKey/infoKey, più sotto),
 // ma il README e la scheda di anteprima lo mostrano ancora: parla la stessa lingua.
@@ -997,5 +1032,5 @@ export {
   gaugeKey, linesKey, bigCountKey, burnKey, usageMeterKey, labelKey, actionKey,
   STATUS_LOOK, statusKey, APPROVE_LOOK, approveKey, fmtNum,
   aCapo, grandeKey, decisioneKey, opzioneKey, paginaKey, domandaKey, infoKey, iconaStrumento, SPENTO, selettoreKey,
-  sceltaKey, confermaKey, vuotoKey, postaKey, thecoreKey, icona, D as DISCORD, TESSERA, comeTitolo,
+  sceltaKey, confermaKey, vuotoKey, postaKey, thecoreKey, luceKey, icona, D as DISCORD, TESSERA, comeTitolo,
 };

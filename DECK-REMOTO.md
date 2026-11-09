@@ -344,6 +344,62 @@ Claude può chiedere qualcosa**: dai a tre tasti TheCore della riga in basso la 
 della pagina di Claude), e la riga diventa quella delle risposte finché la richiesta
 è aperta, per tornare ai numeri subito dopo.
 
+## Le luci di Smart Life
+
+Le luci e le strisce LED che comandi con Alexa si comandano anche dal deck, con il
+tasto **Luce (Smart Life)**: accende e spegne, dà più o meno luce, o accende a una
+percentuale. Il tasto mostra se la luce è accesa e quanto.
+
+Alexa non ha un modo ufficiale per farsi comandare da un altro programma (le strade
+non ufficiali usano il login di Amazon e si rompono quando Amazon cambia). Ma Alexa
+è solo un telecomando sopra **Smart Life**, che è **Tuya**: il plugin parla con il
+cloud di Tuya, con le chiavi di un progetto sviluppatore gratuito collegato alla tua
+app. Si fa una volta.
+
+### 1. Il progetto su Tuya (una volta)
+
+1. Vai su <https://platform.tuya.com> e registrati: va bene un account nuovo, non
+   serve quello di Smart Life.
+2. **Cloud → Development → Create Cloud Project**:
+   - nome: «Stream Deck»;
+   - Industry: **Smart Home**; Development Method: **Smart Home**;
+   - Data Center: quello del tuo account Smart Life. Per l'Italia di solito è
+     **Central Europe Data Center**.
+   Alla finestra dei servizi API lascia quelli proposti (fra questi **IoT Core**) e
+   conferma.
+3. Nel progetto apri **Devices → Link App Account → Add App Account**: compare un
+   codice QR. Nell'app **Smart Life**, su **Io** tocca l'icona di scansione in alto e
+   inquadra il QR, poi conferma. Le tue luci compaiono nell'elenco del progetto.
+4. In **Overview** copia **Access ID / Client ID** e **Access Secret / Client
+   Secret**.
+
+### 2. Sul deck
+
+1. Trascina **Luce (Smart Life)** su un tasto e apri le sue impostazioni.
+2. In fondo, in **Smart Life (Tuya) — condivise**, incolla le due chiavi e scegli
+   il data center (lo stesso del progetto). La riga sotto deve dire «Collegato · N
+   dispositivi».
+3. In alto scegli **La luce** e cosa fa **Premuto**: accende e spegne, più luce,
+   meno luce (di quanto: «Di quanto, in %», di solito 20), o accende a una
+   percentuale.
+
+Un tasto per luce: per esempio **Studio** (accende e spegne), **+20%** e **−20%**
+accanto. Lo stato si legge una volta al minuto, solo mentre la pagina è a schermo, e
+subito dopo ogni pressione: il tasto mostra il risultato atteso appena premi e lo
+corregge se Tuya dice altro. Una luce comandata da Alexa o dall'app compare sul deck
+entro un minuto.
+
+- **«Più luce» su una luce spenta la accende**; **«meno luce» si ferma all'1% e non
+  la spegne**: per spegnere c'è l'interruttore.
+- **«chiavi Tuya?»**: mancano le chiavi, o Tuya le rifiuta (data center diverso da
+  quello del progetto, chiave copiata male, servizio scaduto).
+- **Il servizio gratuito IoT Core scade**: Tuya lo dà in prova e lo fa rinnovare
+  ogni tanto (avvisa per mail). Si rinnova gratis dal pannello: **Cloud → Cloud
+  Services → IoT Core**, «Extend Trial Period». Se un giorno tutti i tasti Luce
+  dicono «chiavi Tuya?», guarda prima lì.
+- **«offline»**: la luce non è raggiungibile dal cloud (spenta dall'interruttore a
+  muro, Wi-Fi). Il tasto tiene l'ultimo stato che conosceva.
+
 ## Se qualcosa non va
 
 - **Il pannello dice «chiave deck errata»:** nel campo c'è la chiave CLOUD, o una

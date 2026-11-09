@@ -532,3 +532,27 @@ Guida utente: `DECK-REMOTO.md`, «La terza pagina». Per chi tocca il codice:
   regex chain turned `select '/*', 1; drop …; select '*/'` into one string, and
   `src/supabase.js` now uses the same lexer. Off: `DECK_LETTURE_SQL=0` (cloud),
   global setting `sqlLettureAuto: false` (PC).
+
+## Smart Life lights (1.16.0, 09/11/2026)
+
+- `src/luci.js` + the **Luce (Smart Life)** action. Alexa has no supported API for its
+  devices; Smart Life is Tuya, so the plugin calls the **Tuya cloud OpenAPI** with a
+  developer project linked to the user's Smart Life account. Signing copied from the
+  official `@tuya/tuya-connector-nodejs` 2.1.2 (`core/client.js`) and tinytuya's
+  `Cloud.py` (developer.tuya.com is not reachable from the build container): HMAC-SHA256
+  over `client_id + access_token + t + [METHOD, sha256(body), "", path?sorted-unencoded-query].join("\n")`,
+  uppercase hex, no token on `GET /v1.0/token?grant_type=1`; a GET signs sha256("").
+  Endpoints: `/v1.0/iot-01/associated-users/devices` (paged by `last_row_key`),
+  `/v1.0/iot-03/devices/{id}/specification|status|commands`. Token re-fetched before
+  expiry and once on code 1010/1011; server clock offset adopted like tinytuya.
+- Capabilities come from the device's specification (`switch_led`/`switch`/`switch_1`,
+  `bright_value_v2`/`bright_value` with their min/max/step), so 10–1000 and 25–255
+  devices both map to 1–100 %. The press shows the expected state at once
+  (`comandiPer().atteso`), then re-reads after 1.5 s; presses on one light are queued
+  so three «+20%» make three steps.
+- **Quota:** the free IoT Core trial counts calls, so status is read only while a Luce
+  key is visible, once a minute (and after a press); the device list every ten
+  minutes; two minutes of back-off after an error. `AGENT_VITALS_TUYA_BASE` points the
+  client at a fake Tuya for tests only.
+- Not tested against the real Tuya cloud from here (no account, no network to it):
+  the fake in `test/luci.test.js` re-implements the signature check independently.

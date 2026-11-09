@@ -9,6 +9,10 @@ import path from "node:path";
 import { spawn, execFile } from "node:child_process";
 import { escapeAppleScript, parseHotkey, hotkeyClause, classifyCustomCommand, parseKeychainToken, parsePsTree, hostAppForPid, focusStrategyForBundle, terminalFocusScript, parseProcStarts } from "./osa.js";
 import { letturaAutomatica, LETTURA_APPROVATA } from "../cloud/deck-hook.mjs";
+import {
+  TuyaCloud, confLuci, capacitaDa, statoDa, comandiPer,
+  INTERVALLO_LUCI_MS, ELENCO_MS, RITARDO_ERRORE_LUCI_MS, RILETTURA_DOPO_MS,
+} from "./luci.js";
 import { letturaSonda, serveSonda, candidatiClaude, eSonda, rigaCmd, ARGOMENTI_SONDA, SONDA_TIMEOUT_MS, NOME_CARTELLA } from "./sonda.js";
 import { usageDaRisposta, percorsiDesktop, letturaDesktop, formaDesktop, letturaStatusline, rigaStatusline, statuslineFragment, completa, serveEndpoint, ritardoDopo429, API_BASE_MS } from "./consumi.js";
 import { windowStartMs, parseRequests, mergeById, aggregate, aggregateByModel, budgetPct, localDay, newDayCounts, foldDayChunk, dayCountsTotals } from "./usage.js";
@@ -120,6 +124,10 @@ const state = {
   // (src/posta.js); thecore: { dati, at, okAt, err } (src/thecore.js).
   posta: new Map(),
   thecore: null,
+  // Le luci di Smart Life (src/luci.js): l'elenco dell'account, cosa sa fare ognuna, e
+  // per ognuna { stato:{acceso,pct}, at, err, errTipo }. errTipo/err in cima: un errore
+  // che riguarda tutte (le chiavi).
+  luci: { dispositivi: new Map(), elencoAt: 0, cap: new Map(), rec: new Map(), err: null, errTipo: null, erroreAt: 0 },
   lastHeadChangeAt: 0,
   globalSettings: {},
   pluginUUID: null,
@@ -1410,6 +1418,8 @@ function onKeyDown(context, kind) {
       setTimeout(() => pollPosta({ subito: chiave }), 45_000);
       return act(context, platform.openUrl(urlGmail(email)));
     }
+    case "luce":
+      return premiLuce(context);
     case "thecore": {
       const m = METRICHE[metricaDi(views.get(context)?.settings)];
       // Senza una pagina (l'outbox) la pressione rilegge.
@@ -1789,6 +1799,128 @@ async function pollTheCore(forza = false) {
   renderAll(["thecore"]);
 }
 
+// ---------- le luci di Smart Life (src/luci.js) ----------
+// Lo stato si legge solo con un tasto Luce a schermo, una volta al minuto, e subito
+// dopo una pressione; l'elenco ogni dieci minuti. Il cloud di Tuya conta le chiamate
+// del piano gratuito: niente giri a vuoto.
+let tuya = null, tuyaFirma = "", luciInCorso = false;
+function clientTuya() {
+  const conf = confLuci(state.globalSettings);
+  if (!conf.ok) { tuya = null; tuyaFirma = ""; return null; }
+  const firma = `${conf.clientId}|${impronta(conf.secret)}|${conf.regione}`;
+  if (firma !== tuyaFirma) {
+    tuyaFirma = firma;
+    // AGENT_VITALS_TUYA_BASE: un Tuya finto per le prove (http://127.0.0.1:…).
+    tuya = new TuyaCloud({ ...conf, base: process.env.AGENT_VITALS_TUYA_BASE || null });
+    // Chiavi o data center cambiati: quello che si sapeva era di un altro progetto.
+    state.luci = { dispositivi: new Map(), elencoAt: 0, cap: new Map(), rec: new Map(), err: null, errTipo: null, erroreAt: 0 };
+  }
+  return tuya;
+}
+const idLuciVisibili = () => new Set([...views.values()].filter((v) => v.kind === "luce" && v.settings?.dispositivo).map((v) => String(v.settings.dispositivo)));
+function erroreLuci(e) {
+  const tipo = e?.tipo ?? "rete";
+  const msg = String(e?.message ?? e);
+  if (state.luci.err !== msg) log(`luci: ${tipo}: ${msg}`);
+  return { tipo, msg };
+}
+async function capDi(c, id) {
+  if (!state.luci.cap.has(id)) state.luci.cap.set(id, capacitaDa(await c.specifica(id)));
+  return state.luci.cap.get(id);
+}
+async function pollLuci({ forza = false, elenco = false, solo = null } = {}) {
+  const c = clientTuya();
+  const ids = solo ? new Set([solo]) : idLuciVisibili();
+  if (!c) { renderAll(["luce"]); return; }
+  if (!forza && !elenco && !ids.size && ![...views.values()].some((v) => v.kind === "luce")) return;
+  if (luciInCorso) return;
+  const L = state.luci;
+  if (!forza && L.erroreAt && Date.now() - L.erroreAt < RITARDO_ERRORE_LUCI_MS) return;
+  luciInCorso = true;
+  try {
+    if (elenco || !L.elencoAt || Date.now() - L.elencoAt > ELENCO_MS) {
+      const lista = await c.dispositivi();
+      L.dispositivi = new Map(lista.map((d) => [d.id, d]));
+      L.elencoAt = Date.now();
+      // L'elenco porta già lo stato di ogni dispositivo: vale come una lettura.
+      for (const d of lista) {
+        if (!d.status || !ids.has(d.id)) continue;
+        const st = statoDa(d.status, await capDi(c, d.id));
+        if (st) L.rec.set(d.id, { stato: st, at: Date.now(), err: null, errTipo: null });
+      }
+    }
+    for (const id of ids) {
+      const r = L.rec.get(id);
+      if (!forza && r?.at && Date.now() - r.at < INTERVALLO_LUCI_MS) continue;
+      try {
+        const st = statoDa(await c.stato(id), await capDi(c, id));
+        L.rec.set(id, { stato: st, at: Date.now(), err: null, errTipo: null });
+      } catch (e) {
+        const { tipo, msg } = erroreLuci(e);
+        if (tipo === "chiave") throw e;
+        // Un errore di una luce non cancella lo stato che si sapeva: il tasto lo tiene
+        // e dice «offline».
+        L.rec.set(id, { stato: r?.stato ?? null, at: Date.now(), err: msg, errTipo: tipo });
+      }
+    }
+    L.err = null; L.errTipo = null; L.erroreAt = 0;
+  } catch (e) {
+    const { tipo, msg } = erroreLuci(e);
+    L.err = msg; L.errTipo = tipo; L.erroreAt = Date.now();
+    if (tipo === "chiave") for (const id of ids) L.rec.set(id, { stato: null, at: Date.now(), err: msg, errTipo: tipo });
+  } finally {
+    luciInCorso = false;
+  }
+  renderAll(["luce"]);
+}
+
+// Una pressione: i comandi partono subito e il tasto mostra lo stato atteso, poi si
+// rilegge quello vero. Le pressioni sulla stessa luce vanno in fila, così tre «più»
+// di seguito fanno tre passi e non tre volte lo stesso.
+const filaLuce = new Map(); // id -> Promise
+function premiLuce(context) {
+  const settings = views.get(context)?.settings ?? {};
+  const id = settings.dispositivo ? String(settings.dispositivo) : null;
+  const c = clientTuya();
+  if (!c || !id) return showAlert(context);
+  const prima = filaLuce.get(id) ?? Promise.resolve();
+  const giro = prima.then(async () => {
+    const L = state.luci;
+    try {
+      const cap = await capDi(c, id);
+      const rec = L.rec.get(id);
+      const piano = comandiPer(settings, rec?.stato ?? null, cap);
+      if (!piano) { showAlert(context); return; }
+      L.rec.set(id, { ...(rec ?? {}), stato: piano.atteso, at: Date.now(), err: null, errTipo: null });
+      renderAll(["luce"]);
+      await c.comandi(id, piano.commands);
+      setTimeout(() => pollLuci({ forza: true, solo: id }), RILETTURA_DOPO_MS);
+    } catch (e) {
+      const { tipo, msg } = erroreLuci(e);
+      L.rec.set(id, { stato: L.rec.get(id)?.stato ?? null, at: Date.now(), err: msg, errTipo: tipo });
+      showAlert(context);
+      renderAll(["luce"]);
+      // Lo stato mostrato era quello atteso: si rilegge quello vero.
+      setTimeout(() => pollLuci({ forza: true, solo: id }), RILETTURA_DOPO_MS);
+    }
+  });
+  filaLuce.set(id, giro.finally(() => { if (filaLuce.get(id) === giro) filaLuce.delete(id); }));
+}
+
+// L'elenco per il Property Inspector: id, nome, online, e se le chiavi vanno.
+function luciPerPI() {
+  const conf = confLuci(state.globalSettings);
+  const L = state.luci;
+  return {
+    ok: conf.ok,
+    regione: conf.regione,
+    err: L.err,
+    errTipo: L.errTipo,
+    dispositivi: [...L.dispositivi.values()].map((d) => ({ id: d.id, nome: d.nome, online: d.online, categoria: d.categoria }))
+      .sort((a, b) => a.nome.localeCompare(b.nome, "it")),
+  };
+}
+
 // ---------- selftest mode (no Stream Deck needed) ----------
 if (process.argv.includes("--selftest")) {
   (async () => {
@@ -1888,6 +2020,7 @@ if (process.argv.includes("--selftest")) {
       if (GAUGE_WINDOW[kindOf(action)]) setTimeout(() => pollSonda(), 1500);
       if (kindOf(action) === "posta") pollPosta();
       if (kindOf(action) === "thecore") pollTheCore();
+      if (kindOf(action) === "luce") setTimeout(() => pollLuci(), 300);
     } else if (event === "willDisappear") {
       const wasApproveKey = faDaApprovazione(views.get(context));
       views.delete(context);
@@ -1917,6 +2050,7 @@ if (process.argv.includes("--selftest")) {
         render(context, v.kind);
         if (v.kind === "usage-meter" || GAUGE_WINDOW[v.kind]) pollUsageMeter();
         if (v.kind === "posta") pollPosta();
+        if (v.kind === "luce") pollLuci();
       }
     } else if (event === "didReceiveGlobalSettings") {
       state.globalSettings = msg.payload?.settings ?? {};
@@ -1925,7 +2059,8 @@ if (process.argv.includes("--selftest")) {
       ensureHookServer();
       programmaRelay(200);
       renderApproveAll();
-      renderAll(["posta", "thecore"]);
+      renderAll(["posta", "thecore", "luce"]);
+      if (clientTuya()) pollLuci({ elenco: !state.luci.elencoAt });
       pollPosta();
       pollTheCore();
     } else if (event === "sendToPlugin" && action) {
@@ -1939,6 +2074,12 @@ if (process.argv.includes("--selftest")) {
         send({ event: "sendToPropertyInspector", context, payload: {
           posta: statoPosta({ settings, rec, haPassword: !!passwordDi(state.globalSettings, email) }),
         } });
+      }
+      if (msg.payload?.cmd === "getLuci") {
+        // «Aggiorna» nel Property Inspector rilegge l'elenco; aprirlo no, se è fresco.
+        const rispondi = () => send({ event: "sendToPropertyInspector", context, payload: { luci: luciPerPI() } });
+        rispondi();
+        if (clientTuya()) pollLuci({ elenco: !!msg.payload?.aggiorna || !state.luci.elencoAt, forza: !!msg.payload?.aggiorna }).then(rispondi, rispondi);
       }
       if (msg.payload?.cmd === "getTheCore") {
         send({ event: "sendToPropertyInspector", context, payload: {
@@ -1972,6 +2113,7 @@ if (process.argv.includes("--selftest")) {
   // Due giri leggeri: rileggono solo ciò che è scaduto (src/posta.js, src/thecore.js).
   setInterval(pollPosta, 15_000);
   setInterval(pollTheCore, 30_000);
+  setInterval(pollLuci, 15_000);
   // Animation ticker: busy-session dots + red pulse on gauges at 90%+
   setInterval(() => {
     animPhase = (animPhase + 1) % 3;

@@ -631,3 +631,29 @@ test("dalla barra di stato: conto alla rovescia finché è fresca, poi l'età", 
   assert.match(drawn("usage-session", { state: dopo }), /23%/);
   assert.doesNotMatch(drawn("usage-session", { state: ripartita }), /23%/);
 });
+
+test("il tasto Luce: nome, percentuale e barra accesa; «Spenta» senza barra; senza chiavi lo dice", () => {
+  const luci = {
+    dispositivi: new Map([["d1", { id: "d1", nome: "Lampada studio", online: true }]]),
+    cap: new Map([["d1", { interruttore: "switch_led", luminosita: { code: "bright_value_v2", min: 10, max: 1000, step: 1 } }]]),
+    rec: new Map([["d1", { stato: { acceso: true, pct: 60 }, at: NOW }]]),
+  };
+  const gs = { tuyaId: "cid", tuyaSecret: "s" };
+  const accesa = drawn("luce", { state: { ...emptyState(), globalSettings: gs, luci }, settings: { dispositivo: "d1" } });
+  // «Lampada studio» in testa non ci sta: in testa il gesto, il nome intero sotto.
+  assert.match(accesa, />Spegni</);
+  assert.match(accesa, />Lampada studio</);
+  assert.match(accesa, /60%/);
+  assert.match(accesa, /width="70"/, "la barra al 60% di 116 pixel");
+  luci.rec.set("d1", { stato: { acceso: false, pct: 60 }, at: NOW });
+  const spenta = drawn("luce", { state: { ...emptyState(), globalSettings: gs, luci }, settings: { dispositivo: "d1" } });
+  assert.match(spenta, /Spenta/);
+  assert.doesNotMatch(spenta, /width="70"/);
+  assert.match(drawn("luce", { state: emptyState(), settings: {} }), /chiavi Tuya\?/);
+  // Un nome corto resta in testa, con il gesto sotto.
+  luci.dispositivi.set("d1", { id: "d1", nome: "Studio", online: true });
+  luci.rec.set("d1", { stato: { acceso: true, pct: 60 }, at: NOW });
+  const corto = drawn("luce", { state: { ...emptyState(), globalSettings: gs, luci }, settings: { dispositivo: "d1" } });
+  assert.match(corto, />Studio</);
+  assert.match(corto, />tocca per spegnere</);
+});

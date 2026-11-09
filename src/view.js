@@ -12,10 +12,11 @@ import path from "node:path";
 import {
   C, gaugeKey, linesKey, bigCountKey, burnKey, usageMeterKey, labelKey, actionKey,
   statusKey, fmtNum, aCapo, decisioneKey, opzioneKey, paginaKey, domandaKey, infoKey, iconaStrumento, selettoreKey,
-  sceltaKey, confermaKey, vuotoKey, postaKey, thecoreKey,
+  sceltaKey, confermaKey, vuotoKey, postaKey, thecoreKey, luceKey,
 } from "./keyart.js";
 import { vistaPosta, facciaPosta, passwordDi, chiaveLettura, normEmail, modoDi } from "./posta.js";
 import { vistaTheCore, confTheCore } from "./thecore.js";
+import { vistaLuce, confLuci } from "./luci.js";
 import { budgetPct, gaugeSource, familyOf } from "./usage.js";
 import { cinqueOre, finestraValida, daEndpoint, SETTE_GIORNI_MS } from "./consumi.js";
 import {
@@ -380,6 +381,17 @@ export function viewFor(kind, env) {
     case "thecore": {
       const v = vistaTheCore({ settings, tc: state.thecore, conf: confTheCore(state.globalSettings) });
       return img(thecoreKey(v));
+    }
+    case "luce": {
+      const id = settings.dispositivo;
+      const l = state.luci ?? {};
+      const v = vistaLuce({
+        settings, conf: confLuci(state.globalSettings),
+        dispositivo: id ? l.dispositivi?.get?.(id) ?? null : null,
+        rec: id ? l.rec?.get?.(id) ?? (l.errTipo ? { errTipo: l.errTipo, err: l.err } : null) : null,
+        cap: id ? l.cap?.get?.(id) ?? null : null,
+      });
+      return img(luceKey(v));
     }
     case "approve-allow":
     case "approve-always":
