@@ -1,48 +1,75 @@
 // Key art: the pure SVG renderers for every Stream Deck key (144x144).
 // Everything here is a pure function of its arguments — no module state, no I/O — so
 // the whole deck can be rendered outside the plugin for review.
-// localGauge() stays in plugin.js: it reads the animPhase ticker.
+// localGauge() sta in view.js: riceve la fase del ticker come argomento.
 //
-// THREE RULES, each from a measurement rather than taste:
+// UN LINGUAGGIO SOLO, QUELLO DI DISCORD (09/11/2026). La terza pagina è nata così,
+// accanto ai tasti di Discord; le pagine di Claude l'hanno seguita perché il deck parli
+// una lingua sola: il fondo grigio di Discord, icone piene e bianche su una tessera
+// colorata, i valori grandi e bianchi, una riga tenue sotto. Quattro regole, e ognuna
+// viene da qualcosa che si era rotto (le misure sono nella storia di questo file):
 //
-//  1. COLOUR IS MEANING, NEVER DECORATION. Data renders in bone (C.text); colour is
-//     reserved for state and for the three approve decisions. This is forced, not
-//     chosen: five hues are already spoken for (ok/warn/bad/info/ask) and every
-//     candidate for a sixth "data accent" landed within 1.00-1.19:1 of one of them,
-//     worse under deuteranopia. The old Claude orange was itself in that band, which
-//     is why a deck showing four dollar amounts read as an alarm.
+//  1. IL COLORE È UN SIGNIFICATO, MAI UNA DECORAZIONE — e ha due posti, che non si
+//     scambiano. La TESSERA dice CHI è il tasto: identità, fissa (Terminale è sempre
+//     verde acqua, la terza pagina colora il gruppo). L'ANELLO intorno al tasto, il
+//     numerino, il valore e la riga sotto dicono COSA SUCCEDE: lo stato, coi colori di
+//     presenza di Discord (verde fatto, giallo aspetta te, rosso guasto o oltre il
+//     limite) più blu al lavoro e viola una domanda. Le tessere d'identità sono le tinte
+//     scure dei ruoli di Discord, gli stati sono vivi: scuro = chi, vivo = cosa. Colorare
+//     per stato il posto dell'identità è ciò che aveva fatto passare un FOCUS al lavoro
+//     per il tasto ALWAYS blu accanto. L'eccezione dichiarata è il tasto di una sessione:
+//     lì il tasto È lo stato, e la tessera ne prende colore e icona. I dati restano
+//     bianchi; ha colore solo ciò che passa una soglia (la percentuale di un consumo).
 //
-//  2. A BAND MEANS THE PRESS LEAVES THE DECK. Actions with an external side effect
-//     (launch an app, focus a window, answer a permission prompt) get a top band and
-//     a glyph; keys that only cycle or refresh what they already display get neither.
-//     The band carries the key's own fixed IDENTITY hue and never varies with state,
-//     while the frame tint carries state alone — different place on the key, and a
-//     2.5x-4.6x chroma gap. Colouring the band BY state is what let a working FOCUS
-//     key impersonate the vivid-blue ALWAYS key beside it in the bundled profile.
-//     Band WEIGHT is a separate channel: rule / double / fill is what separates the
-//     three approve keys in greyscale, which is why the identity cap must stay far
-//     darker than DENY's fill (see WASH).
+//  2. UNA TESSERA VUOL DIRE CHE LA PRESSIONE ESCE DAL DECK. Scorciatoie, sessioni, la
+//     riga in basso: una tessera colorata con l'icona bianca, come un server di Discord.
+//     I tasti che mostrano e basta (consumi, conteggi: la pressione cambia vista o
+//     aggiorna) hanno l'icona nuda e il titolo tenue, come un canale. Sulla terza pagina
+//     ogni tasto apre qualcosa, e infatti ognuno ha la sua tessera (della posta la busta).
 //
-//  3. ONE SKELETON on every key, both classes: header 0-34, value, sub at y=127.
+//  3. LA FORMA PORTA CIÒ CHE IL COLORE NON PUÒ. Il verde di ALLOW e il rosso di DENY, per
+//     un daltonico rosso-verde, finiscono entrambi oliva (1.34:1). Quindi ALLOW è un
+//     TONDO con la spunta, DENY un OTTAGONO — lo stop — con la croce, il tasto centrale
+//     un QUADRATO arrotondato con l'icona dello strumento (✓✓ sul vecchio ALWAYS): tre
+//     sagome e tre segni, anche in scala di grigi. ALLOW a pressione lunga resta un'altra
+//     cosa: tondo ambra con l'arco del «tieni premuto» intorno, anello ambra, la scritta.
+//     Gli stati di una sessione hanno ognuno la sua icona (avviso, domanda, scintilla,
+//     spunta, luna, campana, puntini): la si riconosce prima di leggere.
+//
+//  4. UNO SCHELETRO SOLO: testata 0-44 (tessera o icona, e il titolo accanto), il valore,
+//     la riga sotto a y=126. La riga in basso ha la sua variante: la sagoma grande in
+//     alto, il testo, la riga sotto.
 import { describeRequest, alwaysRule } from "./approve.js";
 
+// La tavolozza di Discord. È anche quella della terza pagina (postaKey, thecoreKey più
+// sotto), che la usa così com'è: cambiarla cambia anche quei tasti.
+const D = {
+  bg: "#313338", // Discord, il fondo della chat
+  testo: "#f2f3f5",
+  tenue: "#b5bac1",
+  spento: "#80848e",
+  rosso: "#ed4245", // badge delle menzioni, «si è rotto»
+  giallo: "#f0b232", // «c'è da fare»
+  tessera: { Vendite: "#23a55a", Directory: "#5865f2", Hiring: "#eb459e", Operativo: "#6d6f78" },
+};
+
+// Le pagine di Claude parlano la stessa lingua. Gli stati sono i colori di presenza di
+// Discord (online, inattivo, non disturbare) più due: blu al lavoro e viola una domanda,
+// lontani di tinta fra loro (204° e 264°) perché il blu di Discord e il viola si
+// confondevano già a colori normali. Ognuno regge sia il testo sul fondo (da 3.3:1, il
+// rosso, a 4.0:1) sia l'icona bianca sopra (≥3.1:1): è il compromesso dei verdi e dei
+// rossi di Discord, perché le due misure non possono superare insieme 3.6:1. Il giallo
+// vuole l'inchiostro scuro (8.7:1).
 const C = {
-  bg: "#16151c",
-  panel: "#211f2b",
-  text: "#f5f1ea",
-  dim: "#9b96a8",
-  // Band rule for an action. Achromatic on purpose: zero hue is zero collision with
-  // any state colour, in any vision type and in greyscale. 3.56:1 as a graphic mark
-  // once composited, above the 3:1 non-text target. The old solid-orange launch key
-  // WAS findable — it was just shouting; this keeps the findability.
-  rail: "#807b8d",
-  // Identity hues, one per action: WHICH key is this, never what is happening. Hue
-  // alone could not carry identity — every candidate collided with a state colour —
-  // but CHROMA can. These sit at chroma ~20 against a state palette whose lowest is
-  // 49 (info blue), a 2.5x-4.6x separation, so vivid reads as signal and muted reads
-  // as identity. All land at 8.4:1 on the background. They colour the BAND and GLYPH
-  // only; the frame tint stays exclusively for state, so a working FOCUS key still
-  // cannot be mistaken for the vivid-blue ALWAYS key beside it.
+  bg: D.bg,
+  panel: "#2b2d31",
+  text: D.testo,
+  dim: D.tenue,
+  spento: D.spento,
+  track: "#1e1f22", // il fondo di una barra, scavato come i campi di Discord
+  rail: D.spento, // un segno neutro: lo usa la scheda di tools/gen-og.mjs
+  // Tinte d'identità a bassa crominanza: le usa SOLO iconSvg (l'arte di riserva dei tasti
+  // nel manifest, tools/gen-icons.mjs). Sui tasti l'identità è TESSERA, qui sotto.
   ident: {
     code: "#96b99e", launch: "#cbab8f", chat: "#b8abce", web: "#cda5bd",
     focus: "#7fbbbf", project: "#bbb08c", prompt: "#d7a4a6", custom: "#94b4d4",
@@ -51,14 +78,25 @@ const C = {
     // (249°) e chat (302°), 122° fra project (93°) e code (152°). 8.4:1 e 8.6:1 sul fondo.
     posta: "#a6afd5", thecore: "#abb790",
   },
-  ok: "#4ade80",
-  warn: "#fbbf24",
-  bad: "#f87171",
-  track: "#3a3745",
-  info: "#60a5fa", // status: working
-  ask: "#a855f7", // status: input needed
+  ok: D.tessera.Vendite, // #23a55a, «online»
+  warn: D.giallo,
+  bad: D.rosso,
+  info: "#3498db", // al lavoro
+  ask: "#a970ff", // una domanda, un input
 };
-const pctColor = (p) => (p == null ? C.dim : p >= 85 ? C.bad : p >= 60 ? C.warn : C.ok);
+
+// La tessera d'identità di ogni scorciatoia: le tinte scure dei ruoli di Discord, e il
+// blurple per la chat. Tutte reggono l'icona bianca sopra (da 3.4:1 a 8:1). Un colore
+// per tasto, fisso: dice QUALE tasto è, mai cosa sta succedendo.
+const TESSERA = {
+  code: "#11806a", launch: "#c15f3c", chat: "#5865f2", web: "#206694",
+  focus: "#546e7a", project: "#c27c0e", prompt: "#ad1457", custom: "#71368a",
+};
+// La tessera di un tasto che c'è ma adesso non chiama (nessuna richiesta): il grigio dei
+// pulsanti secondari di Discord, con l'icona spenta.
+const TESSERA_SPENTA = "#4e5058";
+
+const pctColor = (p) => (p == null ? C.spento : p >= 85 ? C.bad : p >= 60 ? C.warn : C.ok);
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const FONT = "-apple-system, Segoe UI, system-ui, sans-serif";
 
@@ -98,27 +136,25 @@ const svgWrap = (inner) =>
   "data:image/svg+xml," + encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="18" fill="${C.bg}"/>${inner}</svg>`);
 
-// Translucent wash plus concentric strokes that read as a glow. Concentric strokes
-// rather than feGaussianBlur: the Stream Deck renderer can't be relied on for filters.
-// `strong` is for the "blocked on you" states.
+// L'anello di stato intorno al tasto, come l'anello di chi parla intorno a un avatar di
+// Discord, più una velatura leggera. `strong` è per gli stati «bloccato su di te».
+// Un anello solo e non una sfumatura: sullo Stream Deck i filtri non sono affidabili.
 function tintFrame(col, strong = false, phase = null) {
   if (!col) return "";
-  // phase != null → breathe across the ticker's 3 frames. The 5px stroke is what the
-  // eye tracks, so it has to swing; holding it constant made the breath imperceptible
-  // at arm's length while still paying the full frame cost.
+  // phase != null → respira sui 3 fotogrammi del ticker. È lo spessore dell'anello che
+  // l'occhio segue, quindi è l'opacità dell'anello a oscillare: tenerla ferma rendeva il
+  // respiro invisibile a un braccio di distanza, pagando comunque i fotogrammi.
   const p = phase == null ? 1 : [0.3, 0.65, 1][phase % 3];
-  const washOp = (strong ? 0.22 : 0.1) * (phase == null ? 1 : 0.6 + 0.4 * p);
-  const mainOp = phase == null ? (strong ? 1 : 0.8) : 0.25 + 0.75 * p;
-  return `<rect width="144" height="144" rx="18" fill="${col}" opacity="${washOp.toFixed(3)}"/>
-    <rect x="2" y="2" width="140" height="140" rx="17" fill="none" stroke="${col}" stroke-width="2" opacity="${((strong ? 0.45 : 0.22) * p).toFixed(3)}"/>
-    <rect x="5" y="5" width="134" height="134" rx="15" fill="none" stroke="${col}" stroke-width="${strong ? 5 : 3}" opacity="${mainOp.toFixed(3)}"/>
-    <rect x="9.5" y="9.5" width="125" height="125" rx="12" fill="none" stroke="${col}" stroke-width="1" opacity="${(0.18 * p).toFixed(3)}"/>`;
+  const velo = (strong ? 0.13 : 0.06) * (phase == null ? 1 : 0.55 + 0.45 * p);
+  const op = phase == null ? (strong ? 1 : 0.75) : 0.25 + 0.75 * p;
+  return `<rect width="144" height="144" rx="18" fill="${col}" opacity="${velo.toFixed(3)}"/>` +
+    `<rect x="3.5" y="3.5" width="137" height="137" rx="15" fill="none" stroke="${col}" stroke-width="${strong ? 5 : 3}" opacity="${op.toFixed(3)}"/>`;
 }
 
 // ---------- glyphs (authored in a 24-unit box, stroked) ----------
-// The redundant, colour-independent channel. ALLOW green and DENY red are 1.59:1
-// apart in normal vision and 1.34:1 as a deuteranope sees them — both collapse to
-// olive — so the mark, not the hue, is what separates them.
+// Sui tasti non si disegnano più: le icone dei tasti sono ICONE, piene. Restano per le
+// due superfici fuori dal deck, che le vogliono a tratto: l'arte di riserva del manifest
+// (iconSvg) e l'elenco delle azioni dell'app Stream Deck (listIconSvg, bianco e basta).
 const GLYPHS = {
   allow: ["M4 13 L9.5 18.5 L20 6"],
   always: ["M2 13 L7 18 L16.5 6.5", "M10.5 18 L20 6.5"],
@@ -131,9 +167,7 @@ const GLYPHS = {
   prompt: ["M4 7 h16", "M4 12.5 h11", "M4 18 h7"],
   custom: ["M4 7.5 h16", "M4 16.5 h16", "M9 7.5 m0 0 a2.4 2.4 0 1 0 0.01 0", "M15 16.5 m0 0 a2.4 2.4 0 1 0 0.01 0"],
   focus: ["M12 12 m-7 0 a7 7 0 1 0 14 0 a7 7 0 1 0 -14 0", "M12 1.5 v4", "M12 18.5 v4", "M1.5 12 h4", "M18.5 12 h4"],
-  // Report-kind marks. Report KEYS carry no glyph — that absence is the action-class
-  // signal — but the Stream Deck action list needs one row icon per action, so these
-  // exist for iconSvg() only.
+  // Report-kind marks, for the action list: it needs one row icon per action.
   gauge: ["M3.5 18 a8.5 8.5 0 1 1 17 0", "M12 18 L16.5 10.5"],
   meter: ["M3.5 12.5 h17 a3 3 0 0 1 0 6 h-17 a3 3 0 0 1 0 -6 z", "M7 15.5 h6"],
   rising: ["M4 16.5 L10 10 L14 14 L20 7", "M20 12 V7 h-5"],
@@ -144,24 +178,9 @@ const GLYPHS = {
   calendar: ["M4 6.5 h16 v14 H4 z", "M4 11 h16", "M8 3 v4", "M16 3 v4"],
   week: ["M4 6.5 h16 v14 H4 z", "M4 11 h16", "M8 3 v4", "M16 3 v4", "M7.5 15 h3", "M13.5 15 h3"],
   grid: ["M4 4.5 h6 v6 H4 z", "M14 4.5 h6 v6 h-6 z", "M4 13.5 h6 v6 H4 z", "M14 13.5 h6 v6 h-6 z"],
-  // Riga in basso e sessioni (fork TecNicorico): un'icona per ciò che il tasto fa o dice.
-  database: ["M5 6 a7 2.6 0 1 0 14 0 a7 2.6 0 1 0 -14 0", "M5 6 v12 a7 2.6 0 0 0 14 0 V6", "M5 12 a7 2.6 0 0 0 14 0"],
-  question: ["M12 12 m-9.5 0 a9.5 9.5 0 1 0 19 0 a9.5 9.5 0 1 0 -19 0", "M9.3 9.4 a2.8 2.8 0 1 1 4 2.5 c-0.85 0.42 -1.3 1 -1.3 2.1", "M12 17.3 v0.2"],
-  alert: ["M12 3.5 L21.5 20 H2.5 Z", "M12 9.5 v5", "M12 17.3 v0.2"],
-  spark: ["M12 3 v4", "M12 17 v4", "M3 12 h4", "M17 12 h4", "M5.6 5.6 l2.8 2.8", "M15.6 15.6 l2.8 2.8", "M5.6 18.4 l2.8 -2.8", "M15.6 8.4 l2.8 -2.8"],
-  moon: ["M19.5 14.6 A8 8 0 1 1 9.4 4.5 a6.3 6.3 0 0 0 10.1 10.1 z"],
-  cloud: ["M7.2 18.5 h10 a4 4 0 0 0 0.4 -7.98 a5.6 5.6 0 0 0 -10.9 1.5 a3.3 3.3 0 0 0 0.5 6.48 z"],
-  file: ["M6.5 3 h7.5 l4 4 v14 h-11.5 z", "M14 3 v4 h4"],
-  plug: ["M9 3 v4.5", "M15 3 v4.5", "M6.5 7.5 h11 v3 a5.5 5.5 0 0 1 -11 0 z", "M12 16 v5"],
-  arrowR: ["M4.5 12 h15", "M13.5 6 l6 6 -6 6"],
-  arrowL: ["M19.5 12 h-15", "M10.5 6 l-6 6 6 6"],
-  hold: ["M12 12 m-9.5 0 a9.5 9.5 0 1 0 19 0 a9.5 9.5 0 1 0 -19 0", "M7.5 12.5 l3 3 6 -7"],
-  // La terza pagina: la posta e i gruppi di metriche di TheCore.
+  // La terza pagina: la posta e il gruppo di TheCore, per le stesse due superfici.
   posta: ["M3.5 6 h17 v12 h-17 z", "M3.5 6.5 L12 13 L20.5 6.5"],
-  euro: ["M17.5 7 A6.5 6.5 0 1 0 17.5 17", "M4.5 10.5 h9", "M4.5 13.5 h9"],
   scuola: ["M3 10 L12 4.5 L21 10", "M5 10 v9", "M19 10 v9", "M3 19.5 h18", "M10 19.5 v-5 h4 v5"],
-  persone: ["M9 8.5 m-3.5 0 a3.5 3.5 0 1 0 7 0 a3.5 3.5 0 1 0 -7 0", "M2.5 20 a6.5 6.5 0 0 1 13 0", "M16 5.5 a3 3 0 0 1 0 6", "M18 14 a5.5 5.5 0 0 1 3.5 5.5"],
-  battito: ["M2.5 12.5 h4.5 l2.5 -6 l4 11 l2.5 -5 h5.5"],
 };
 
 // A standalone 72x72 icon for the Stream Deck action list, drawn from the same glyph
@@ -179,7 +198,7 @@ function iconSvg(glyphName, col = C.text) {
 // That surface has its own rules, and they are the opposite of the key art's:
 // Elgato requires action-list icons to be monochrome white stroke (#FFFFFF) on a
 // TRANSPARENT background at 20x20 (40x40 for high-DPI), with the category icon at
-// 28x28. The key icons are 72x72 with a filled #16151c plate and carry identity
+// 28x28. The key icons are 72x72 with a filled plate and carry identity
 // hues — a solid background and colour, both of which the list explicitly forbids.
 // One glyph table feeds both so the two surfaces can never drift apart.
 function listIconSvg(glyphName, px = 20) {
@@ -196,210 +215,7 @@ function glyph(name, x, y, size, col, sw = 2.6) {
     (GLYPHS[name] ?? []).map((d) => `<path d="${d}"/>`).join("") + "</g>";
 }
 
-// ---------- shared skeleton ----------
-// `narrow` reserves room for a corner marker. Without it a long header ran straight
-// into the "est" tag and "THIS MONTH" + "est" read as one word.
-const header = (s, narrow = false) =>
-  line(12, 25, narrow ? 88 : 106, 15, 700, C.dim, String(s).toUpperCase(), "start", ' letter-spacing="0.6"');
-const foot = (s, col = C.dim) => (s ? line(72, 127, 130, 14, 400, col, s) : "");
-const corner = (tag, col = C.dim) => (tag ? txt(132, 25, 12, 600, col, String(tag).slice(0, 8), "end") : "");
-const badge = (n, col) =>
-  `<circle cx="121" cy="20" r="11.5" fill="${C.panel}" stroke="${col}" stroke-width="1.5"/>` +
-  txt(121, 25, 14, 700, C.text, n);
-
-// The action-class marker. Weight differs by consequence so the three approve keys
-// stay distinct in greyscale, where hue tells you nothing.
-// WASH is the ceiling, not a preference. As the cap brightens it climbs toward DENY's
-// filled band, and once the two land in the same lightness class "filled cap" stops
-// identifying DENY — which is the channel that makes the approve trio separable in
-// greyscale. At 0.24 the cap is 3.4x darker than DENY's fill and identity text still
-// measures 5.17:1 on it. 0.30 sits exactly on AA (4.50:1) with no margin left, and
-// 0.38 drops the text to 3.69:1, below AA.
-const WASH = 0.24;
-// A band that reaches y=0 must follow the key's rounded top corners. A plain rect paints
-// straight over the rx=18 corner and the key reads as square-cornered along its top edge.
-// Authored as a path rather than a clipPath so each key SVG stays self-contained — the
-// showcase composes many of them into one document, where duplicate ids would collide.
-const R = 18;
-const topCap = (h) =>
-  `M0 ${h} V${R} A${R} ${R} 0 0 1 ${R} 0 H${144 - R} A${R} ${R} 0 0 1 144 ${R} V${h} Z`;
-const band = {
-  rule: (col, m = 1) => `<rect x="0" y="33" width="144" height="2.5" fill="${col}" opacity="${(0.85 * m).toFixed(2)}"/>`,
-  // Identity cap for an action key: a tinted header zone closed by a bright rule.
-  cap: (col, m = 1) =>
-    `<path d="${topCap(37)}" fill="${col}" opacity="${(WASH * m).toFixed(3)}"/>` +
-    `<rect x="0" y="34" width="144" height="3" fill="${col}" opacity="${(0.95 * m).toFixed(2)}"/>`,
-  double: (col, m = 1) => `<rect x="0" y="33" width="144" height="2.5" fill="${col}" opacity="${(0.85 * m).toFixed(2)}"/><rect x="0" y="38" width="144" height="1.5" fill="${col}" opacity="${(0.55 * m).toFixed(2)}"/>`,
-  fill: (col, m = 1) => `<path d="${topCap(35)}" fill="${col}" opacity="${(0.9 * m).toFixed(2)}"/>`,
-};
-// Header row for an action key: glyph + title. Both in dim so they clear AA — drawing
-// them in the rail colour measured 1.99:1, worse than what it replaced.
-const actionHead = (glyphName, title, fg = C.dim) =>
-  glyph(glyphName, 10, 8, 22, fg) +
-  line(38, 25, 82, 16, 800, fg, String(title).toUpperCase(), "start", ' letter-spacing="0.5"');
-
-// ================= REPORT KEYS — no band, no glyph, value in bone =================
-// A press only cycles or refreshes what is already on screen, so nothing warns you.
-
-function usageMeterKey(head, big, sub, isCost) {
-  const none = String(big) === "--";
-  const est = isCost && !none;
-  return svgWrap(`
-    ${header(head, est)}
-    ${est ? corner("est") : ""}
-    ${line(72, 88, 128, 42, 700, none ? C.dim : C.text, big, "middle", "", 20)}
-    ${foot(sub)}`);
-}
-
-function gaugeKey(label, pct, sub, pulsePhase = null) {
-  const has = typeof pct === "number" && isFinite(pct);
-  const p = has ? Math.max(0, Math.min(100, pct)) : 0;
-  // The percentage crosses thresholds, so it IS state and keeps its colour.
-  const col = has ? pctColor(p) : C.dim;
-  const pulse = pulsePhase == null ? "" :
-    `<rect x="4" y="4" width="136" height="136" rx="16" fill="none" stroke="${C.bad}" stroke-width="6" opacity="${[0.2, 0.55, 0.95][pulsePhase % 3]}"/>`;
-  return svgWrap(`
-    ${pulse}
-    ${header(label)}
-    ${line(72, 82, 128, has ? 44 : 32, 700, col, has ? Math.round(p) + "%" : "--")}
-    <rect x="12" y="94" width="120" height="10" rx="5" fill="${C.track}"/>
-    ${has ? `<rect x="12" y="94" width="${Math.max(7, (120 * p) / 100).toFixed(1)}" height="10" rx="5" fill="${col}"/>` : ""}
-    ${foot(sub)}`);
-}
-
-function burnKey(tokensHour, sub) {
-  const has = tokensHour != null;
-  return svgWrap(`
-    ${header("burn rate")}
-    ${line(72, 84, 128, has ? 42 : 32, 700, has ? C.text : C.dim, has ? fmtNum(tokensHour) : "--")}
-    ${txt(72, 105, 15, 400, C.dim, "tok/hr")}
-    ${foot(sub)}`);
-}
-
-function linesKey(title, rows) {
-  const rowSvg = rows.map((r, i) =>
-    line(12, 64 + i * 30, 122, 21, r.big ? 700 : 600, r.color ?? C.text, r.text, "start")).join("");
-  return svgWrap(`${header(title)}${rowSvg}`);
-}
-
-function bigCountKey(title, count, sub, subColor, animPhase = null, tint = null, strong = false) {
-  // animPhase non-null → cycling activity dots beside the count (frame-pushed).
-  const dots = animPhase == null ? "" : [0, 1, 2]
-    .map((i) => `<circle cx="128" cy="${58 + i * 15}" r="${i === animPhase ? 4.5 : 3}" fill="${i === animPhase ? (tint ?? C.info) : C.track}"/>`)
-    .join("");
-  return svgWrap(`
-    ${tintFrame(tint, strong)}
-    ${header(title)}
-    ${dots}
-    ${line(72, 97, 118, 60, 700, count > 0 ? C.text : C.dim, count)}
-    ${foot(sub, subColor ?? C.dim)}`);
-}
-
-const STATUS_LOOK = {
-  "needs-approval": { label: "Needs approval", col: C.warn, strong: true },
-  "input-needed": { label: "Input needed", col: C.ask, strong: true },
-  working: { label: "Working", col: C.info },
-  finished: { label: "Finished", col: C.ok },
-  idle: { label: "Idle", col: C.dim },
-  none: { label: "no session", col: C.dim },
-  quiet: { label: "all clear", col: C.dim }, // Waiting key, nothing pending
-  // A session that reports no status (VS Code extension) and whose transcript we
-  // couldn't stat. Saying "no status" beats inventing "Idle".
-  unknown: { label: "no status", col: C.dim },
-};
-// L'icona di ogni stato, in alto a sinistra: si riconosce da lontano prima di leggere.
-const STATUS_ICON = { "needs-approval": "alert", "input-needed": "question", working: "spark", finished: "allow", idle: "moon" };
-function statusKey(name, st, count, detail = "", tag = "", phase = null, sottotitolo = "", inRisposta = false) {
-  const look = STATUS_LOOK[st] ?? STATUS_LOOK.none;
-  const shown = String(name || "CLAUDE").slice(0, 11);
-  const icona = STATUS_ICON[st] ? glyph(STATUS_ICON[st], 10, 8, 22, look.col, 2.4) : "";
-  // Count badge wins the corner; otherwise the "cli"/"code" tag, which is the only
-  // way to tell two sessions in the same project apart. Una sessione nel cloud ha la
-  // nuvola al posto della parola.
-  const angolo = count > 1 ? badge(count, look.col) : tag === "cloud" ? glyph("cloud", 110, 7, 24, C.info, 2.2) : corner(tag);
-  // La sessione a cui sta rispondendo la riga in basso: un'etichetta piena in alto.
-  const pill = inRisposta
-    ? `<rect x="38" y="9" width="68" height="20" rx="10" fill="${look.col}"/>` + txt(72, 23.5, 11, 800, C.bg, "RISPONDI")
-    : "";
-  return svgWrap(`
-    ${tintFrame(look.col, !!look.strong, phase)}
-    ${icona}
-    ${angolo}
-    ${pill}
-    ${sottotitolo ? conTitolo(shown, sottotitolo, look.col) : `
-    ${line(72, 78, 128, 25, 700, st === "none" ? C.dim : C.text, shown)}
-    ${line(72, 104, 130, 17, 700, look.col, look.label)}`}
-    ${detail ? line(72, 127, 132, 13, 400, C.dim, detail) : ""}`);
-}
-
-// Il tasto Focus quando ci sono richieste: a quale sessione sta rispondendo la riga in
-// basso. Premuto passa alla sessione dopo (vedi prossimaScelta in approve.js).
-function selettoreKey(nome, titolo, indice, totale, col = C.warn) {
-  const righe = titolo ? aCapo(titolo, 16, 2) : [];
-  return svgWrap(`
-    ${tintFrame(col, true)}
-    ${band.cap(C.ident.focus)}
-    ${actionHead("focus", "rispondi a", C.ident.focus)}
-    ${line(72, righe.length ? 66 : 86, 128, 22, 700, C.text, String(nome || "claude"))}
-    ${righe.map((t, i) => line(72, 88 + i * 17, 130, 14, 700, col, t)).join("")}
-    ${foot(totale > 1 ? `${indice}/${totale} · premi: cambia` : "l'unica in attesa")}`);
-}
-
-// Con un titolo, il titolo prende il posto della parola dello stato («Working»): lo
-// stato resta nel colore del riquadro, del titolo e nell'icona in alto a sinistra.
-function conTitolo(nome, titolo, col) {
-  const righe = aCapo(titolo, 16, 2);
-  return line(72, righe.length > 1 ? 70 : 78, 128, 22, 700, C.text, nome) +
-    righe.map((t, i) => line(72, (righe.length > 1 ? 93 : 103) + i * 17, 130, 15, 700, col, t)).join("");
-}
-
-function fmtNum(n) {
-  if (n == null) return "--";
-  if (n >= 1e9) return (n / 1e9).toFixed(1) + "B";
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
-  return String(n);
-}
-
-// ================= ACTION KEYS — band + glyph, the press leaves the deck =========
-
-// The four actions that had no renderer at all and shipped as flat icon art, which is
-// what ran two visual languages on one deck.
-function actionKey(glyphName, title, label, sub) {
-  const id = C.ident[glyphName] ?? C.rail;
-  return svgWrap(`
-    ${band.cap(id)}
-    ${actionHead(glyphName, title, id)}
-    ${line(72, 92, 128, 24, 700, C.text, label)}
-    ${foot(sub)}`);
-}
-
-// ================= LA TERZA PAGINA — posta e TheCore, nello stile di Discord =========
-// La terza pagina sta accanto ai tasti di Discord, e il 09/11/2026 è stata chiesta
-// «nello stesso stile»: fondo grigio di Discord, icone piene e bianche su una tessera
-// colorata (come le icone dei server), e il pallino rosso delle menzioni per ciò che
-// c'è da leggere. È un linguaggio diverso da quello delle pagine di Claude, apposta:
-// queste chiavi parlano col resto della loro pagina.
-//
-// Il colore resta comunque un significato:
-//   la TESSERA  dice il gruppo (vendite, Directory, Hiring, operativo): identità, fissa;
-//   il PALLINO  sulla tessera dice lo stato: giallo c'è da fare, rosso si è rotto;
-//   la BUSTA    porta il conteggio nel badge rosso di Discord; grigio se il numero è vecchio.
-const D = {
-  bg: "#313338", // Discord, il fondo della chat
-  testo: "#f2f3f5",
-  tenue: "#b5bac1",
-  spento: "#80848e",
-  rosso: "#ed4245", // badge delle menzioni, «si è rotto»
-  giallo: "#f0b232", // «c'è da fare»
-  tessera: { Vendite: "#23a55a", Directory: "#5865f2", Hiring: "#eb459e", Operativo: "#6d6f78" },
-};
-const TONO_D = { attenzione: D.giallo, guasto: D.rosso };
-
-const svgDiscord = (inner) =>
-  "data:image/svg+xml," + encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="18" fill="${D.bg}"/>${inner}</svg>`);
-
+// ================= LE ICONE — piene, in un riquadro da 24 =================
 // Poligoni calcolati una volta: la rosetta del sigillo e la stella.
 const stellaD = (punte, rFuori, rDentro, cx, cy, ruota = -90) => {
   const p = [];
@@ -412,13 +228,17 @@ const stellaD = (punte, rFuori, rDentro, cx, cy, ruota = -90) => {
 };
 const cerchio = (cx, cy, r) => `M${cx} ${cy} m-${r} 0 a${r} ${r} 0 1 0 ${2 * r} 0 a${r} ${r} 0 1 0 -${2 * r} 0`;
 const foglio = "M6.3 2.8 H13.8 L18.8 7.8 V19.6 A1.6 1.6 0 0 1 17.2 21.2 H6.3 A1.6 1.6 0 0 1 4.7 19.6 V4.4 A1.6 1.6 0 0 1 6.3 2.8 Z";
+const fumetto = "M5 3.8 H19 A2.5 2.5 0 0 1 21.5 6.3 V14.6 A2.5 2.5 0 0 1 19 17.1 H11.4 L6.6 20.9 V17.1 H5 A2.5 2.5 0 0 1 2.5 14.6 V6.3 A2.5 2.5 0 0 1 5 3.8 Z";
 
-// Le icone, in un riquadro da 24. Tre modi di disegnare un pezzo:
+// Quattro modi di disegnare un pezzo:
 //   p  pieno, nel colore dell'icona;
 //   l  linea, nel colore dell'icona;
+//   L  linea grossa: i segni che devono leggersi da lontano (✓, ✗, le frecce);
 //   t  taglio: una linea nel colore del FONDO, che apre il pieno (la piega della busta,
 //      la spunta del sigillo). Così l'icona resta un solo colore e si legge da lontano.
 //   b  pieno col bordo del fondo: separa una figura da quella dietro (le due persone).
+// Le icone delle pagine di Claude hanno i nomi dei glifi che sostituiscono (allow,
+// code, database…): view.js le chiama per nome, e i nomi restano quelli.
 const ICONE = {
   posta: [["p", "M4.8 5 H19.2 A2.3 2.3 0 0 1 21.5 7.3 V16.7 A2.3 2.3 0 0 1 19.2 19 H4.8 A2.3 2.3 0 0 1 2.5 16.7 V7.3 A2.3 2.3 0 0 1 4.8 5 Z"],
     ["t", "M4.4 7.5 L12 12.8 L19.6 7.5"]],
@@ -442,6 +262,49 @@ const ICONE = {
   penna: [["p", "M16.1 3.6 L20.4 7.9 L9.8 18.5 L4.4 19.6 L5.5 14.2 Z"], ["t", "M14.2 5.5 L18.5 9.8"], ["l", "M12.6 21 H21"]],
   camion: [["p", "M3.6 6.2 H14.6 V16.4 H2.4 V7.4 A1.2 1.2 0 0 1 3.6 6.2 Z"], ["p", "M15.6 9.2 H18.7 L21.6 12.6 V16.4 H15.6 Z"],
     ["b", cerchio(7, 17.4, 2.3)], ["b", cerchio(17.6, 17.4, 2.3)]],
+
+  // ---- le pagine di Claude ----
+  // La riga in basso: i tre segni che separano le decisioni anche senza colore.
+  allow: [["L", "M5 12.8 L10 17.6 L19.4 7.2"]],
+  always: [["L", "M2.4 12.8 L7.1 17.4 L16.3 7.4"], ["L", "M11.6 17.4 L21.4 7.4"]],
+  deny: [["L", "M7 7 L17 17"], ["L", "M17 7 L7 17"]],
+  arrowR: [["L", "M4.5 12 H19"], ["L", "M13.4 6.3 L19.1 12 L13.4 17.7"]],
+  arrowL: [["L", "M19.5 12 H5"], ["L", "M10.6 6.3 L4.9 12 L10.6 17.7"]],
+  // Gli stati di una sessione.
+  alert: [["p", "M10.27 4 A2 2 0 0 1 13.73 4 L21.6 17.7 A2 2 0 0 1 19.87 20.7 H4.13 A2 2 0 0 1 2.4 17.7 Z"],
+    ["t", "M12 9.2 V13.6"], ["t", "M12 16.9 V17"]],
+  question: [["p", cerchio(12, 12, 10)], ["t", "M9.3 9.6 A2.75 2.75 0 1 1 13.3 12 C12.4 12.45 12 13 12 14"], ["t", "M12 17.1 V17.2"]],
+  spark: [["p", "M12 2.4 C12.9 8.1 15.9 11.1 21.6 12 C15.9 12.9 12.9 15.9 12 21.6 C11.1 15.9 8.1 12.9 2.4 12 C8.1 11.1 11.1 8.1 12 2.4 Z"]],
+  moon: [["p", "M20.2 14.9 A8.7 8.7 0 1 1 9.1 3.8 A6.9 6.9 0 0 0 20.2 14.9 Z"]],
+  puntini: [["p", cerchio(5, 12, 2.3)], ["p", cerchio(12, 12, 2.3)], ["p", cerchio(19, 12, 2.3)]],
+  // Lo stesso tracciato del glifo: una richiesta del cloud la nuvola la porta in alto.
+  cloud: [["p", "M7.2 18.5 h10 a4 4 0 0 0 0.4 -7.98 a5.6 5.6 0 0 0 -10.9 1.5 a3.3 3.3 0 0 0 0.5 6.48 z"]],
+  // Le scorciatoie, e gli strumenti che chiedono un permesso.
+  code: [["p", "M4.6 3.8 H19.4 A2.1 2.1 0 0 1 21.5 5.9 V18.1 A2.1 2.1 0 0 1 19.4 20.2 H4.6 A2.1 2.1 0 0 1 2.5 18.1 V5.9 A2.1 2.1 0 0 1 4.6 3.8 Z"],
+    ["t", "M6.8 8.8 L10.1 12 L6.8 15.2"], ["t", "M12.3 15.4 H17.2"]],
+  launch: [["l", "M13.6 3.4 H20.6 V10.4"], ["l", "M20.4 3.6 L11.6 12.4"],
+    ["l", "M18 13.8 V19 A1.6 1.6 0 0 1 16.4 20.6 H5 A1.6 1.6 0 0 1 3.4 19 V7.6 A1.6 1.6 0 0 1 5 6 H10.2"]],
+  chat: [["p", fumetto]],
+  web: [["p", cerchio(12, 12, 9.8)], ["t", "M2.6 12 H21.4"], ["t", "M12 2.4 C8.3 6.2 8.3 17.8 12 21.6 C15.7 17.8 15.7 6.2 12 2.4 Z"]],
+  project: [["p", "M3.9 4.4 H9.4 L11.6 6.8 H20.1 A1.5 1.5 0 0 1 21.6 8.3 V18.1 A1.5 1.5 0 0 1 20.1 19.6 H3.9 A1.5 1.5 0 0 1 2.4 18.1 V5.9 A1.5 1.5 0 0 1 3.9 4.4 Z"],
+    ["t", "M2.4 9.4 H21.6"]],
+  focus: [["l", cerchio(12, 12, 6.6)], ["p", cerchio(12, 12, 2.5)], ["l", "M12 1.8 V5"], ["l", "M12 19 V22.2"],
+    ["l", "M1.8 12 H5"], ["l", "M19 12 H22.2"]],
+  // Quick prompt: il fulmine, perché è un prompt già scritto che parte con un tocco.
+  prompt: [["p", "M13.6 2 L4.6 13.6 H11.1 L10.1 22 L19.4 10 H12.9 Z"]],
+  custom: [["l", "M3.2 7.4 H20.8"], ["l", "M3.2 16.6 H20.8"], ["b", cerchio(9, 7.4, 2.9)], ["b", cerchio(15, 16.6, 2.9)]],
+  file: [["p", foglio], ["t", "M13.8 2.8 V7.8 H18.8"], ["t", "M8.3 12.6 H15.2"], ["t", "M8.3 16.4 H13"]],
+  layers: [["p", "M12 2.8 L21.4 8.2 L12 13.6 L2.6 8.2 Z"], ["l", "M2.9 12.4 L12 17.6 L21.1 12.4"], ["l", "M2.9 16.5 L12 21.7 L21.1 16.5"]],
+  plug: [["l", "M9 2.6 V7"], ["l", "M15 2.6 V7"], ["p", "M5.8 7 H18.2 V10.4 A6.2 6.2 0 0 1 5.8 10.4 Z"], ["l", "M12 16.4 V21.6"]],
+  database: [["p", "M5 6 A7 2.9 0 0 1 19 6 V18 A7 2.9 0 0 1 5 18 Z"], ["t", "M5 6 A7 2.9 0 0 0 19 6"], ["t", "M5 12 A7 2.9 0 0 0 19 12"]],
+  dot: [["p", cerchio(12, 12, 4.6)]],
+  // I tasti che mostrano e basta.
+  gauge: [["l", "M3.6 17.6 A8.8 8.8 0 1 1 20.4 17.6"], ["L", "M12 15.4 L16.2 9.8"], ["p", cerchio(12, 15.4, 2.3)]],
+  moneta: [["p", cerchio(12, 12, 10)], ["t", "M15.1 8.7 C14.4 7.8 13.4 7.4 12.1 7.4 C10.4 7.4 9.3 8.3 9.3 9.6 C9.3 12.6 15 11.4 15 14.5 C15 15.8 13.8 16.7 12 16.7 C10.6 16.7 9.5 16.2 8.8 15.3"],
+    ["t", "M12 5.4 V18.6"]],
+  fiamma: [["p", "M12 2.3 C13.1 6.2 18.2 8.4 18.2 14.1 A6.2 6.2 0 0 1 5.8 14.1 C5.8 11.2 7.3 9.3 8.8 8.1 C8.9 10.4 9.9 11.7 11.2 12.1 C10.7 8.5 11.1 5.2 12 2.3 Z"]],
+  list: [["p", cerchio(4.6, 6.5, 1.9)], ["p", cerchio(4.6, 12, 1.9)], ["p", cerchio(4.6, 17.5, 1.9)],
+    ["l", "M9.4 6.5 H20.6"], ["l", "M9.4 12 H20.6"], ["l", "M9.4 17.5 H17.4"]],
 };
 
 function icona(nome, x, y, size, colore, fondo) {
@@ -451,7 +314,8 @@ function icona(nome, x, y, size, colore, fondo) {
     if (m === "p") return `<path d="${d}" fill="${colore}"/>`;
     if (m === "b") return `<path d="${d}" fill="${colore}" stroke="${fondo}" stroke-width="1.7" paint-order="stroke"/>`;
     const col = m === "t" ? fondo : colore;
-    return `<path d="${d}" fill="none" stroke="${col}" stroke-width="${m === "t" ? 1.9 : linea}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    const w = m === "t" ? 1.9 : m === "L" ? 3 : linea;
+    return `<path d="${d}" fill="none" stroke="${col}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"/>`;
   }).join("");
   return `<g transform="translate(${x},${y}) scale(${s.toFixed(4)})">${pezzi}</g>`;
 }
@@ -460,6 +324,291 @@ function icona(nome, x, y, size, colore, fondo) {
 // pallini di presenza di Discord.
 const pallino = (cx, cy, col) =>
   `<circle cx="${cx}" cy="${cy}" r="9" fill="${D.bg}"/><circle cx="${cx}" cy="${cy}" r="6" fill="${col}"/>`;
+
+// ================= IL LINGUAGGIO COMUNE delle pagine di Claude =================
+// Luminanza relativa (WCAG) di un #rrggbb: decide l'inchiostro sopra una tessera. Sul
+// giallo l'icona bianca misura 1.9:1, quella scura 8.7:1 — come i badge gialli di Discord.
+const luce = (hex) => {
+  const n = parseInt(String(hex).slice(1), 16);
+  const c = (v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+  return 0.2126 * c(n >> 16) + 0.7152 * c((n >> 8) & 255) + 0.0722 * c(n & 255);
+};
+const inchiostro = (fondo) => (luce(fondo) > 0.4 ? "#1e1f22" : "#ffffff");
+
+// I titoli arrivano da view.js in maiuscolo («SESSION 5H», «THIS MONTH»): qui diventano
+// come i nomi della terza pagina («Fatturato»), con la maiuscola solo all'inizio. Un
+// titolo già scritto in minuscolo prende la maiuscola iniziale, tranne un dominio
+// («claude.ai»). Claude resta Claude.
+function comeTitolo(s) {
+  const t = String(s ?? "");
+  const su = (t.match(/[A-Z]/g) ?? []).length, giu = (t.match(/[a-z]/g) ?? []).length;
+  const base = su > giu ? t.toLowerCase() : t;
+  if (/^[a-z0-9-]+\.[a-z]{2,}$/.test(base)) return base;
+  return (base.charAt(0).toUpperCase() + base.slice(1)).replace(/\bclaude\b/g, "Claude").replace(/^Claude code\b/, "Claude Code");
+}
+
+// Le sagome: la tessera (quadrato arrotondato, come i server di Discord), il tondo e
+// l'ottagono della riga in basso. `r` è mezzo lato; l'ottagono è un po' più largo del
+// tondo, così le due sagome pesano uguale e gli spigoli si vedono.
+function sagoma(tipo, cx, cy, r, fill, extra = "") {
+  if (tipo === "tondo") return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}"${extra}/>`;
+  if (tipo === "ottagono") {
+    const R = r * 1.07;
+    const p = [];
+    for (let i = 0; i < 8; i++) {
+      const a = ((22.5 + 45 * i) * Math.PI) / 180;
+      p.push(`${(cx + R * Math.cos(a)).toFixed(2)} ${(cy + R * Math.sin(a)).toFixed(2)}`);
+    }
+    return `<path d="M${p.join(" L")} Z" fill="${fill}" stroke="${fill}" stroke-width="${(r * 0.16).toFixed(1)}" stroke-linejoin="round"${extra}/>`;
+  }
+  return `<rect x="${cx - r}" y="${cy - r}" width="${2 * r}" height="${2 * r}" rx="${(r * 0.62).toFixed(1)}" fill="${fill}"${extra}/>`;
+}
+
+// La testata di un tasto che fa qualcosa: la sagoma col suo colore e l'icona, il titolo
+// accanto. È quella di thecoreKey: stessa tessera, stesso posto, stesso titolo.
+//   o.forma    "tessera" (di solito), "tondo" o "ottagono" (il vecchio ALLOW/DENY)
+//   o.ink      l'inchiostro dell'icona, se non quello che il fondo chiede
+//   o.largo    lo spazio del titolo (meno, se c'è qualcosa nell'angolo)
+const testata = (nomeIcona, titolo, fondo, o = {}) =>
+  sagoma(o.forma ?? "tessera", 28, 27, 16, fondo) +
+  icona(nomeIcona, 16, 15, 24, o.ink ?? inchiostro(fondo), fondo) +
+  line(52, 33, o.largo ?? 86, 16, 700, o.colTitolo ?? C.text, comeTitolo(titolo), "start", "", 13);
+
+// La testata di un tasto che mostra e basta: l'icona nuda e tenue, come quella di un
+// canale, e il titolo tenue. Più stretta di quella con la tessera, perché i titoli dei
+// consumi sono lunghi («Sonnet 7d 2/2») e devono restare interi a 13 px.
+const testataReport = (nomeIcona, titolo) =>
+  icona(nomeIcona, 11, 14, 19, C.dim, C.bg) +
+  line(35, 31, 102, 16, 700, C.dim, comeTitolo(titolo), "start", "", 13);
+
+// La riga sotto, tenue: la stessa della terza pagina, ma mai sotto i 13 px (il tasto si
+// vede a metà, 72 px veri: 13 sono 6,5 px). Una riga che a 13 non ci sta va a capo su
+// due righe dove il tasto ha posto (`due`), altrimenti si tronca coi puntini.
+const SOTTO_W = 134;
+function sotto(s, col = C.dim, due = false) {
+  if (!s) return "";
+  const str = String(s);
+  if (due && !fits(str, SOTTO_W, 13)) {
+    // Prima al «·», che separa già due cose («812M in · 300M out»), poi a parole.
+    const i = str.indexOf(" · ");
+    const righe = i > 0 && [str.slice(0, i), str.slice(i + 3)].every((t) => fits(t, SOTTO_W, 13))
+      ? [str.slice(0, i), str.slice(i + 3)]
+      : aCapo(str, capacity(SOTTO_W, 13), 2);
+    return righe.map((t, k) => line(72, 113 + k * 15, SOTTO_W, 13, 500, col, t, "middle", "", 13)).join("");
+  }
+  return line(72, 126, SOTTO_W, 15, 500, col, str, "middle", "", 13);
+}
+const corner = (tag, col = C.dim) => (tag ? txt(132, 25, 12, 600, col, String(tag).slice(0, 8), "end") : "");
+
+// Il numerino di Discord: una pillola col bordo del fondo, sull'angolo di ciò che conta.
+// Bianco e non rosso: qui conta quante cose ci sono, non che qualcosa si è rotto.
+function numerino(cx, cy, testo, fondo = C.text) {
+  const [t, size] = fitClip(String(testo), 30, 14, 13);
+  const w = Math.max(22, Math.ceil(t.length * ADVANCE * size) + 10);
+  return `<rect x="${(cx - w / 2 - 3).toFixed(1)}" y="${cy - 14}" width="${w + 6}" height="28" rx="14" fill="${C.bg}"/>` +
+    `<rect x="${(cx - w / 2).toFixed(1)}" y="${cy - 11}" width="${w}" height="22" rx="11" fill="${fondo}"/>` +
+    txt(cx, cy + 5, size, 800, inchiostro(fondo), t);
+}
+
+// Lo stesso numero, tondo e piccolo, sull'angolo in alto della tessera: dove la terza
+// pagina mette il pallino di stato. Serve dove accanto alla tessera c'è il titolo.
+function pallinoNumero(cx, cy, n) {
+  const [t, size] = fitClip(String(n), 13, 12, 9);
+  return `<circle cx="${cx}" cy="${cy}" r="10.5" fill="${C.bg}"/><circle cx="${cx}" cy="${cy}" r="8.5" fill="${C.text}"/>` +
+    txt(cx, cy + 4.2, size, 800, C.bg, t);
+}
+
+// ================= REPORT KEYS — icona nuda, titolo tenue, valore in bianco ===========
+// A press only cycles or refreshes what is already on screen, so nothing marks it.
+
+function usageMeterKey(head, big, sub, isCost) {
+  const none = String(big) === "--";
+  // «est» dice che la cifra è una stima. Stava nell'angolo in alto, ma accanto all'icona
+  // e al titolo non c'è posto («This month» + «est» si toccavano già una volta): va in
+  // fondo, dopo la riga sotto — che per una spesa senza budget è già «est».
+  const stima = isCost && !none && sub !== "est" ? (sub ? `${sub} · est` : "est") : sub;
+  return svgWrap(`
+    ${testataReport(isCost ? "moneta" : "layers", head)}
+    ${line(72, 88, 128, 42, 800, none ? C.spento : C.text, big, "middle", "", 20)}
+    ${sotto(stima, C.dim, true)}`);
+}
+
+function gaugeKey(label, pct, sub, pulsePhase = null) {
+  const has = typeof pct === "number" && isFinite(pct);
+  const p = has ? Math.max(0, Math.min(100, pct)) : 0;
+  // The percentage crosses thresholds, so it IS state and keeps its colour.
+  const col = has ? pctColor(p) : C.spento;
+  return svgWrap(`
+    ${pulsePhase == null ? "" : tintFrame(C.bad, true, pulsePhase)}
+    ${testataReport("gauge", label)}
+    ${line(72, 82, 128, has ? 44 : 32, 800, col, has ? Math.round(p) + "%" : "--", "middle", "", 20)}
+    <rect x="14" y="94" width="116" height="9" rx="4.5" fill="${C.track}"/>
+    ${has ? `<rect x="14" y="94" width="${Math.max(9, (116 * p) / 100).toFixed(1)}" height="9" rx="4.5" fill="${col}"/>` : ""}
+    ${sotto(sub)}`);
+}
+
+function burnKey(tokensHour, sub) {
+  const has = tokensHour != null;
+  return svgWrap(`
+    ${testataReport("fiamma", "burn rate")}
+    ${line(72, 82, 128, has ? 42 : 32, 800, has ? C.text : C.spento, has ? fmtNum(tokensHour) : "--", "middle", "", 20)}
+    ${txt(72, 104, 15, 500, C.dim, "tok/hr")}
+    ${sotto(sub)}`);
+}
+
+function linesKey(title, rows) {
+  const rowSvg = rows.map((r, i) =>
+    line(14, 68 + i * 26, 120, 20, r.big ? 800 : 700, r.color ?? C.text, r.text, "start", "", 13)).join("");
+  return svgWrap(`${testataReport("list", title)}${rowSvg}`);
+}
+
+function bigCountKey(title, count, sub, subColor, animPhase = null, tint = null, strong = false) {
+  // animPhase non-null → i tre puntini di «sta scrivendo…» di Discord sotto il numero,
+  // uno acceso alla volta (frame-pushed).
+  const dots = animPhase == null ? "" : [0, 1, 2]
+    .map((i) => `<circle cx="${60 + i * 12}" cy="105" r="${i === animPhase ? 4.5 : 3.2}" fill="${i === animPhase ? (tint ?? C.info) : C.spento}"/>`)
+    .join("");
+  return svgWrap(`
+    ${tintFrame(tint, strong)}
+    ${testataReport("code", title)}
+    ${line(72, 90, 118, 52, 800, count > 0 ? C.text : C.spento, count, "middle", "", 20)}
+    ${dots}
+    ${sotto(sub, subColor ?? C.dim)}`);
+}
+
+// ================= SESSIONI — il tasto è lo stato =================
+// `col` colora testo e anello; `tessera` (se diversa) è il fondo dell'icona in alto.
+// Gli stati calmi non hanno anello: un anello vuol dire che sta succedendo qualcosa.
+const STATUS_LOOK = {
+  "needs-approval": { label: "Needs approval", col: C.warn, strong: true, anello: true },
+  "input-needed": { label: "Input needed", col: C.ask, strong: true, anello: true },
+  working: { label: "Working", col: C.info, anello: true },
+  finished: { label: "Finished", col: C.ok, anello: true },
+  idle: { label: "Idle", col: C.dim, tessera: C.spento },
+  none: { label: "no session", col: C.spento, tessera: null },
+  quiet: { label: "all clear", col: C.dim, tessera: TESSERA_SPENTA }, // Waiting key, nothing pending
+  // A session that reports no status (VS Code extension) and whose transcript we
+  // couldn't stat. Saying "no status" beats inventing "Idle".
+  unknown: { label: "no status", col: C.dim, tessera: TESSERA_SPENTA },
+};
+// L'icona di ogni stato, nella tessera in alto a sinistra: si riconosce da lontano prima
+// di leggere. La luna è quella di «inattivo» di Discord.
+const STATUS_ICON = {
+  "needs-approval": "alert", "input-needed": "question", working: "spark", finished: "allow", idle: "moon",
+  quiet: "campana", unknown: "puntini", none: "puntini",
+};
+function statusKey(name, st, count, detail = "", tag = "", phase = null, sottotitolo = "", inRisposta = false) {
+  const look = STATUS_LOOK[st] ?? STATUS_LOOK.none;
+  const shown = String(name || "CLAUDE").slice(0, 11);
+  const fondo = look.tessera === undefined ? look.col : look.tessera;
+  // Senza sessione la tessera c'è ma è vuota: solo il bordo, come un posto libero.
+  const tessera = fondo
+    ? sagoma("tessera", 28, 27, 16, fondo) + icona(STATUS_ICON[st] ?? "puntini", 16, 15, 24, fondo === TESSERA_SPENTA ? C.dim : inchiostro(fondo), fondo)
+    : sagoma("tessera", 28, 27, 14.75, "none", ` stroke="${C.spento}" stroke-width="2.5"`) + icona("puntini", 18, 17, 20, C.spento, C.bg);
+  // Quante sessioni: il numerino vince l'angolo. Se no il «cli»/«code», che è l'unico
+  // modo di distinguere due sessioni nella stessa cartella; una sessione nel cloud ha la
+  // nuvola.
+  const angolo = count > 1 ? numerino(120, 25, count)
+    : tag === "cloud" ? icona("cloud", 107, 9, 27, C.info, C.bg) : corner(tag);
+  // La sessione a cui sta rispondendo la riga in basso: un'etichetta piena in alto, fra
+  // la tessera e l'angolo.
+  const pill = inRisposta
+    ? `<rect x="47" y="16" width="62" height="21" rx="10.5" fill="${look.col}"/>` + txt(78, 30.3, 10.5, 800, inchiostro(look.col), "RISPONDI")
+    : "";
+  return svgWrap(`
+    ${look.anello ? tintFrame(look.col, !!look.strong, phase) : ""}
+    ${tessera}
+    ${angolo}
+    ${pill}
+    ${sottotitolo ? conTitolo(shown, sottotitolo, look.col) : `
+    ${line(72, 80, 128, 25, 800, st === "none" ? C.spento : C.text, shown, "middle", "", 13)}
+    ${line(72, 105, 130, 18, 700, look.col, look.label, "middle", "", 13)}`}
+    ${sotto(detail)}`);
+}
+
+// Il tasto Focus quando ci sono richieste: a quale sessione sta rispondendo la riga in
+// basso. Premuto passa alla sessione dopo (vedi prossimaScelta in approve.js).
+function selettoreKey(nome, titolo, indice, totale, col = C.warn) {
+  const righe = titolo ? aCapo(titolo, 16, 2) : [];
+  return svgWrap(`
+    ${tintFrame(col, true)}
+    ${testata("focus", "rispondi a", TESSERA.focus)}
+    ${line(72, righe.length ? 70 : 86, 128, 22, 800, C.text, String(nome || "claude"), "middle", "", 13)}
+    ${righe.map((t, i) => line(72, 91 + i * 17, 130, 15, 700, col, t, "middle", "", 13)).join("")}
+    ${sotto(totale > 1 ? `${indice}/${totale} · cambia` : "l'unica in attesa", C.dim, !righe.length)}`);
+}
+
+// Con un titolo, il titolo prende il posto della parola dello stato («Working»): lo
+// stato resta nel colore dell'anello, del titolo e nella tessera in alto a sinistra.
+function conTitolo(nome, titolo, col) {
+  const righe = aCapo(titolo, 16, 2);
+  return line(72, righe.length > 1 ? 70 : 78, 128, 22, 800, C.text, nome, "middle", "", 13) +
+    righe.map((t, i) => line(72, (righe.length > 1 ? 92 : 102) + i * 17, 130, 15, 700, col, t, "middle", "", 13)).join("");
+}
+
+function fmtNum(n) {
+  if (n == null) return "--";
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
+  return String(n);
+}
+
+// ================= SCORCIATOIE — la tessera d'identità, la pressione lascia il deck ====
+
+// The four actions that had no renderer at all and shipped as flat icon art, which is
+// what ran two visual languages on one deck.
+function actionKey(glyphName, title, label, sub) {
+  return svgWrap(`
+    ${testata(glyphName, title, TESSERA[glyphName] ?? TESSERA_SPENTA)}
+    ${line(72, 86, 128, 26, 800, C.text, label, "middle", "", 13)}
+    ${sotto(sub, C.dim, true)}`);
+}
+
+// L'icona si ricava dal titolo, così la firma resta quella di prima.
+const GLYPH_FOR = { PROJECT: "project", FOCUS: "focus", PROMPT: "prompt", CLAUDE: "custom" };
+
+// Generic key for configurable actions: header + wrapped label + footer.
+function labelKey(title, label, sub, tint = null, strong = false) {
+  const text = String(label ?? "").trim() || "—";
+  const words = text.split(/\s+/);
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    if ((cur + " " + w).trim().length <= 11) cur = (cur + " " + w).trim();
+    else { lines.push(cur); cur = w; if (lines.length === 2) break; }
+  }
+  if (cur && lines.length < 2) lines.push(cur);
+  const use = lines.slice(0, 2).filter(Boolean);
+  const body = use.map((l, i) =>
+    line(72, use.length > 1 ? 76 + i * 24 : 86, 128, use.length > 1 ? 21 : 24, 800, C.text, l, "middle", "", 13)).join("");
+  // La tessera porta l'IDENTITÀ di questo tasto e non cambia mai con lo stato; lo stato
+  // sta nell'anello. Colorare per stato il posto dell'identità è ciò che aveva fatto
+  // passare un FOCUS al lavoro per il tasto ALWAYS blu accanto, nel profilo di serie.
+  const g = GLYPH_FOR[String(title).toUpperCase()] ?? "custom";
+  return svgWrap(`
+    ${tintFrame(tint, strong)}
+    ${testata(g, title, TESSERA[g])}
+    ${body}
+    ${sotto(sub, C.dim, use.length < 2)}`);
+}
+
+// ================= LA TERZA PAGINA — posta e TheCore, nello stile di Discord =========
+// La terza pagina sta accanto ai tasti di Discord, e il 09/11/2026 è stata chiesta
+// «nello stesso stile»: fondo grigio di Discord, icone piene e bianche su una tessera
+// colorata (come le icone dei server), e il pallino rosso delle menzioni per ciò che
+// c'è da leggere. Lo stesso giorno le pagine di Claude l'hanno seguita (le regole sono
+// in cima a questo file); qui la tessera dice il GRUPPO.
+//
+// Il colore resta comunque un significato:
+//   la TESSERA  dice il gruppo (vendite, Directory, Hiring, operativo): identità, fissa;
+//   il PALLINO  sulla tessera dice lo stato: giallo c'è da fare, rosso si è rotto;
+//   la BUSTA    porta il conteggio nel badge rosso di Discord; grigio se il numero è vecchio.
+const TONO_D = { attenzione: D.giallo, guasto: D.rosso };
+
+const svgDiscord = (inner) =>
+  "data:image/svg+xml," + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="18" fill="${D.bg}"/>${inner}</svg>`);
 
 const VUOTI = new Set(["0", "—", "…", "--", "ok"]);
 
@@ -503,40 +652,13 @@ function thecoreKey(v) {
     ${line(72, 126, 130, 15, 500, tono ?? (v.attenuato ? D.spento : D.tenue), v.sub)}`);
 }
 
-// Glyph is derived from the header so the call signature stays close to the original.
-const GLYPH_FOR = { PROJECT: "project", FOCUS: "focus", PROMPT: "prompt", CLAUDE: "custom" };
-
-// Generic key for configurable actions: header + wrapped label + footer.
-function labelKey(title, label, sub, tint = null, strong = false) {
-  const text = String(label ?? "").trim() || "—";
-  const words = text.split(/\s+/);
-  const lines = [];
-  let cur = "";
-  for (const w of words) {
-    if ((cur + " " + w).trim().length <= 11) cur = (cur + " " + w).trim();
-    else { lines.push(cur); cur = w; if (lines.length === 2) break; }
-  }
-  if (cur && lines.length < 2) lines.push(cur);
-  const use = lines.slice(0, 2).filter(Boolean);
-  const body = use.map((l, i) =>
-    line(72, use.length > 1 ? 76 + i * 26 : 92, 128, 23, 700, C.text, l)).join("");
-  // The band carries this key's fixed IDENTITY hue and never varies with state; the
-  // frame tint carries state alone. Colouring the band BY state is what made a working
-  // FOCUS key impersonate the vivid-blue ALWAYS key sitting next to it in the profile.
-  const g = GLYPH_FOR[String(title).toUpperCase()] ?? "custom";
-  const id = C.ident[g] ?? C.rail;
-  return svgWrap(`
-    ${tintFrame(tint, strong)}
-    ${band.cap(id)}
-    ${actionHead(g, title, id)}
-    ${body}
-    ${foot(sub)}`);
-}
-
+// ================= IL VECCHIO ALLOW / ALWAYS / DENY =================
+// Nessuna pressione lo disegna più (la riga in basso è decisioneKey/infoKey, più sotto),
+// ma il README e la scheda di anteprima lo mostrano ancora: parla la stessa lingua.
 const APPROVE_LOOK = {
-  "approve-allow": { word: "ALLOW", col: C.ok, glyphName: "allow", weight: "rule" },
-  "approve-always": { word: "ALWAYS", col: C.info, glyphName: "always", weight: "double" },
-  "approve-deny": { word: "DENY", col: C.bad, glyphName: "deny", weight: "fill" },
+  "approve-allow": { word: "ALLOW", col: C.ok, icona: "allow", forma: "tondo" },
+  "approve-always": { word: "ALWAYS", col: C.info, icona: "always", forma: "tessera" },
+  "approve-deny": { word: "DENY", col: C.bad, icona: "deny", forma: "ottagono" },
 };
 
 // Splits a rule until every line reaches a legible size, rather than trusting a single
@@ -580,31 +702,34 @@ function ruleLines(rule) {
   return out;
 }
 
-// Nothing pending -> a calm dim look. A pending request tints the frame and (while
+// Nothing pending -> a calm grey look. A pending request rings the key and (while
 // fresh) breathes. ALLOW/DENY show the command; ALWAYS shows the RULE it would
 // persist, because Claude Code's suggestions are wildcards.
 function approveKey(kind, req, o = {}) {
   const look = APPROVE_LOOK[kind];
-  const shell = (col, mult, bodyLines, sub, cornerSvg = "", wordOverride = null) => {
-    // On DENY the band is a solid fill, so its glyph and word sit ON the fill.
-    const onBand = kind === "approve-deny" && mult === 1 ? C.bg : col;
-    // Body lives between the band (ends y=40) and the footer (y=127). Baselines are
-    // tabulated rather than computed so a 4-line rule can't push text off the key.
+  // `attivo` false → la sagoma resta (tondo, quadrato, ottagono: la forma dice quale
+  // tasto è anche spento), ma grigia, e niente anello.
+  const shell = (col, attivo, bodyLines, sub, angolo = {}, wordOverride = null) => {
+    const fondo = attivo ? col : TESSERA_SPENTA;
+    // Il corpo sta fra la testata (fino a y=44) e la riga sotto (y=126). Le linee di base
+    // sono in tabella, non calcolate, così una regola di quattro righe non esce dal tasto.
     const n = Math.min(4, bodyLines.length);
-    const [top, step] = [[92, 0], [78, 26], [68, 22], [62, 18]][n - 1] ?? [92, 0];
+    const [top, step] = [[90, 0], [77, 24], [68, 20], [61, 17]][n - 1] ?? [90, 0];
     const body = bodyLines.slice(0, n).map((l, i) =>
-      line(72, top + i * step, RULE_W, l.max ?? 22, 700, l.col ?? C.text, l.t)).join("");
+      line(72, top + i * step, l.w ?? RULE_W, Math.min(l.max ?? 22, n === 4 ? 17 : 22), 800, l.col ?? C.text, l.t, "middle", "", 13)).join("");
     return svgWrap(`
-      ${tintFrame(col, mult === 1, o.phase ?? null)}
-      ${band[look.weight](col, mult)}
-      ${actionHead(look.glyphName, wordOverride ?? look.word, onBand)}
-      ${cornerSvg}
+      ${attivo ? tintFrame(col, true, o.phase ?? null) : ""}
+      ${testata(look.icona, wordOverride ?? look.word, fondo, {
+        forma: look.forma, ink: attivo ? undefined : C.spento, colTitolo: attivo ? C.text : C.dim,
+        largo: angolo.label ? 86 - angolo.label : 86,
+      })}
+      ${angolo.svg ?? ""}
       ${body}
-      ${foot(sub)}`);
+      ${sotto(sub)}`);
   };
 
-  if (o.err) return shell(C.bad, 1, [], o.err);
-  if (!req) return shell(C.dim, 0.4, [], "all clear");
+  if (o.err) return shell(C.bad, true, [], o.err);
+  if (!req) return shell(C.dim, false, [], "all clear");
 
   const d = describeRequest(req);
   // Una richiesta del cloud lo dice in fondo, accanto al progetto: in alto a destra
@@ -617,12 +742,13 @@ function approveKey(kind, req, o = {}) {
   // would make this look like the unrelated "n/a" case.
   const denied = kind === "approve-always" && rule !== null && !!o.denied;
   const disabled = kind === "approve-always" && (rule === null || denied);
-  const col = disabled ? C.dim : look.col;
-  const mult = disabled ? 0.4 : 1;
-  // Depth badge wins the corner, else an optional user label. The project name keeps
-  // the footer unconditionally: it is a wrong-request mitigation, so a cosmetic label
-  // must not be able to hide it.
-  const cornerSvg = o.depth > 1 ? badge(o.depth, col) : corner(o.label);
+  const col = look.col;
+  // Depth badge on the tile's corner, like a server's mentions; an optional user label
+  // in the key's corner. The project name keeps the footer unconditionally: it is a
+  // wrong-request mitigation, so a cosmetic label must not be able to hide it.
+  const angolo = o.depth > 1
+    ? { svg: pallinoNumero(42, 12, o.depth) }
+    : o.label ? { svg: corner(o.label), label: Math.ceil(String(o.label).slice(0, 8).length * ADVANCE * 12) + 6 } : {};
   const word = kind === "approve-always"
     ? (denied ? "ALWAYS" : rule === null ? "ALWAYS n/a" : `ALWAYS ·${o.sessionOnly ? "ses" : "prj"}`)
     : look.word;
@@ -630,17 +756,17 @@ function approveKey(kind, req, o = {}) {
   // Una scrittura in produzione: il tasto ALLOW chiede la pressione lunga e lo dice
   // in ambra, con il progetto e cosa fa sotto al comando.
   if (kind === "approve-allow" && o.lungo) {
-    return shell(C.warn, 1, [{ t: target, max: 22 }, { t: o.dettaglio || "tieni premuto", col: C.warn, max: 16 }], "tieni premuto 2 s", cornerSvg, "ALLOW 2s");
+    return shell(C.warn, true, [{ t: target, max: 22, w: 120 }, { t: o.dettaglio || "tieni premuto", col: C.warn, max: 16, w: 120 }], "tieni premuto 2 s", angolo, "ALLOW 2s");
   }
 
   if (denied) {
-    return shell(col, mult, ruleLines(rule).map((t) => ({ t, col: C.dim, max: 18 })), String(o.denied), cornerSvg, word);
+    return shell(col, false, ruleLines(rule).map((t) => ({ t, col: C.dim, max: 18 })), String(o.denied), angolo, word);
   }
   const shown = kind === "approve-always" ? (rule ?? target) : target;
   const lines = kind === "approve-always" && rule != null
     ? ruleLines(rule).map((t) => ({ t, max: 19 }))
-    : [{ t: shown, max: 24 }];
-  return shell(col, mult, lines, name, cornerSvg, word);
+    : [{ t: shown, max: 24, w: 120 }];
+  return shell(col, !disabled, lines, name, angolo, word);
 }
 
 // ================= DOMANDE E INFO — la riga in basso quando cambia faccia ==========
@@ -678,77 +804,103 @@ function aCapo(testo, max, righe) {
   return out.length ? out : ["—"];
 }
 
-// Il tasto a icona grande della riga in basso: in alto ciò che il tasto FA (un'icona da
-// 44 px, leggibile da lontano), sotto il testo che dice SU COSA, in fondo da dove viene.
-// Il colore dice quanto è delicato: verde approva, rosso rifiuta, ambra una scrittura
+// Il tasto a sagoma grande della riga in basso: in alto ciò che il tasto FA (una sagoma
+// da 48 px con l'icona, leggibile da lontano), sotto il testo che dice SU COSA, in fondo
+// da dove viene. La sagoma dice quale tasto è (tondo ALLOW, ottagono DENY, quadrato il
+// centro); il colore quanto è delicato: verde approva, rosso rifiuta, ambra una scrittura
 // che chiede la pressione lunga, viola una domanda, blu una lettura.
+//   forma     "tondo" | "ottagono" | "tessera"; senza, l'icona è nuda
+//   fondo     il colore della sagoma; ink l'inchiostro dell'icona, se non quello che serve
 //   testo     righe principali (al più 3; con testo2, una sola)
 //   testo2    riga di dettaglio sotto, nel suo colore
 //   numero    al posto dell'icona, un disco col numero (le opzioni di una domanda)
+//   casella   scelta multipla: quadrato pieno con la spunta, o vuoto col numero
+//   arco      l'arco del «tieni premuto» intorno alla sagoma, in quel colore
 //   cloud     la nuvola in alto a sinistra: la richiesta viene da una sessione cloud
-//   angolo    in alto a destra: { badge: n } oppure { testo: "2 s" }
+//   angolo    { badge: n } (il numerino sulla sagoma) oppure { testo: "2 s" }
+const CY = 35; // il centro della sagoma grande: abbastanza in basso che l'arco non tocchi l'anello
 function grandeKey(o = {}) {
   const colIcona = o.colIcona ?? C.text;
-  // Il disco: pieno col numero (opzione a scelta singola), oppure una casella (scelta
-  // multipla): vuota col numero, piena con la spunta quando è scelta.
-  const icona = o.casella != null
-    ? (o.casella
-      ? `<circle cx="72" cy="34" r="21" fill="${colIcona}"/>${glyph("allow", 58, 20, 28, C.bg, 3.6)}`
-      : `<circle cx="72" cy="34" r="19.5" fill="none" stroke="${colIcona}" stroke-width="3"/>${txt(72, 42.5, 24, 800, colIcona, String(o.numero ?? ""))}`)
-    : o.numero != null
-    ? `<circle cx="72" cy="34" r="21" fill="${colIcona}"/>${txt(72, 43, 26, 800, C.bg, String(o.numero))}`
-    : o.icona ? glyph(o.icona, 50, 12, 44, colIcona, 3.2) : "";
+  let figura = "";
+  if (o.casella != null) {
+    // Scelta multipla: la casella di Discord, un quadrato arrotondato. Scelta, piena con
+    // la spunta; da scegliere, il bordo col numero dell'opzione.
+    figura = o.casella
+      ? sagoma("tessera", 72, CY, 21, colIcona) + icona("allow", 57, CY - 15, 30, inchiostro(colIcona), colIcona)
+      : sagoma("tessera", 72, CY, 19.5, "none", ` stroke="${colIcona}" stroke-width="3"`) + txt(72, CY + 8.5, 24, 800, colIcona, String(o.numero ?? ""));
+  } else if (o.numero != null) {
+    figura = sagoma("tondo", 72, CY, 22, colIcona) + txt(72, CY + 9.5, 27, 800, inchiostro(colIcona), String(o.numero));
+  } else if (o.icona) {
+    figura = o.forma
+      ? sagoma(o.forma, 72, CY, 22, o.fondo) + icona(o.icona, 57, CY - 15, 30, o.ink ?? inchiostro(o.fondo), o.fondo)
+      : icona(o.icona, 54, CY - 18, 36, colIcona, C.bg);
+  }
+  // L'arco del «tieni premuto»: tre quarti di giro intorno al tondo, come una pressione
+  // che si sta riempiendo. È ciò che fa di ALLOW-lungo un altro tasto anche in grigio.
+  const arco = o.arco
+    ? `<path d="M72 ${CY - 27} A27 27 0 1 1 45 ${CY}" fill="none" stroke="${o.arco}" stroke-width="3.5" stroke-linecap="round"/>`
+    : "";
   const righe = (o.testo ?? []).filter((t) => t != null && t !== "");
   let corpoSvg = "";
   // 120 e non 130 di larghezza: le maiuscole in grassetto sono più larghe della stima
-  // di fit(), e «SQL SELECT» a 130 toccava i bordi del tasto.
+  // di fit(), e «SQL SELECT» a 130 toccava i bordi del tasto. La riga di dettaglio è in
+  // minuscolo e più piccola, e ha bisogno di tutta la riga per restare a 13 px.
   const LARGO = 120;
   if (o.testo2) {
-    corpoSvg = (righe[0] != null ? line(72, 82, LARGO, o.ideale ?? 20, 700, o.col ?? C.text, righe[0]) : "") +
-      line(72, 104, LARGO, 15, 700, o.col2 ?? C.dim, o.testo2);
+    corpoSvg = (righe[0] != null ? line(72, 86, LARGO, o.ideale ?? 20, 800, o.col ?? C.text, righe[0], "middle", "", 13) : "") +
+      line(72, 106, SOTTO_W, 15, 700, o.col2 ?? C.dim, o.testo2, "middle", "", 13);
   } else if (righe.length) {
     const n = Math.min(3, righe.length);
-    const [ys, size] = [[[88], o.ideale ?? 20], [[80, 101], Math.min(o.ideale ?? 20, 18)], [[72, 90, 108], 15]][n - 1];
-    corpoSvg = righe.slice(0, n).map((t, i) => line(72, ys[i], LARGO, size, 700, o.col ?? C.text, t)).join("");
+    const [ys, size] = [[[90], o.ideale ?? 20], [[83, 103], Math.min(o.ideale ?? 20, 18)], [[75, 91, 107], 14]][n - 1];
+    corpoSvg = righe.slice(0, n).map((t, i) => line(72, ys[i], LARGO, size, n > 2 ? 700 : 800, o.col ?? C.text, t, "middle", "", 13)).join("");
   }
   // Quante ALTRE richieste aspettano dopo questa: «+1», non «2», che accanto a una
-  // pressione lunga si leggerebbe «2 secondi».
+  // pressione lunga si leggerebbe «2 secondi». Sta sulla sagoma, come le menzioni.
   const altre = (o.angolo?.badge ?? 0) - 1;
   const angolo = altre > 0
-    ? `<circle cx="119" cy="20" r="13" fill="${C.panel}" stroke="${colIcona}" stroke-width="1.5"/>` + txt(119, 25, 13, 800, C.text, `+${altre}`)
-    : o.angolo?.testo ? txt(132, 26, 15, 800, colIcona, o.angolo.testo, "end") : "";
+    ? numerino(96, CY - 17, `+${altre}`)
+    : o.angolo?.testo ? txt(132, 28, 16, 800, o.arco ?? colIcona, o.angolo.testo, "end") : "";
+  // La riga in fondo è un po' più piccola che sugli altri tasti: sopra ci sono fino a tre
+  // righe di testo.
+  const piede = o.piede ? line(72, 128, SOTTO_W, 14, 500, o.colPiede ?? C.dim, o.piede, "middle", "", 13) : "";
   return svgWrap(`
     ${tintFrame(o.tinta ?? null, !!o.forte, o.phase ?? null)}
-    ${o.cloud ? glyph("cloud", 9, 7, 24, C.info, 2.2) : ""}
+    ${o.cloud ? icona("cloud", 9, 8, 26, C.info, C.bg) : ""}
+    ${arco}
+    ${figura}
     ${angolo}
-    ${icona}
     ${corpoSvg}
-    ${foot(o.piede ?? "", o.colPiede ?? C.dim)}`);
+    ${piede}`);
 }
 
-const SPENTO = "#4a4658"; // icona di un tasto senza niente da fare: c'è, ma non chiama
+// La sentinella che view.js passa per «un tasto senza niente da fare» (l'icona spenta
+// del centro senza richieste). Il valore resta quello di prima perché view.js lo scrive
+// a mano: qui vuol dire «disegnalo spento», non questo grigio.
+const SPENTO = "#4a4658";
 
-// ALLOW e DENY con una richiesta (o senza): l'icona è la decisione.
+// ALLOW e DENY con una richiesta (o senza): la sagoma è il tasto, il segno la decisione.
 //   o.lungo      ALLOW chiede la pressione lunga (scrittura in produzione)
 //   o.target     il testo da mostrare al posto del comando (es. "SQL DELETE")
 //   o.depth      quante richieste aspettano
 function decisioneKey(kind, req, o = {}) {
   const allow = kind === "approve-allow";
-  if (o.err) return grandeKey({ icona: "alert", colIcona: C.bad, tinta: C.bad, piede: o.err });
-  if (!req) return grandeKey({ icona: allow ? "allow" : "deny", colIcona: SPENTO, piede: "all clear" });
+  const forma = allow ? "tondo" : "ottagono";
+  const segno = allow ? "allow" : "deny";
+  if (o.err) return grandeKey({ forma, fondo: C.bad, icona: "alert", tinta: C.bad, piede: o.err });
+  if (!req) return grandeKey({ forma, fondo: TESSERA_SPENTA, ink: C.spento, icona: segno, piede: "all clear" });
   const d = describeRequest(req);
   const testo = o.target ? [o.target] : aCapo(targetIntero(req), 14, 3);
   // L'etichetta scelta nelle impostazioni del tasto, se c'è, prende il posto del progetto.
   const comune = { cloud: !!req.cloud, piede: o.label || d.name, phase: o.phase ?? null, angolo: { badge: o.depth } };
   if (allow && o.lungo) {
     return grandeKey({
-      ...comune, icona: "hold", colIcona: C.warn, tinta: C.warn, forte: true,
+      ...comune, forma: "tondo", fondo: C.warn, icona: "allow", arco: C.warn, tinta: C.warn, forte: true,
       testo: testo.slice(0, 1), testo2: "tieni premuto 2 s", col2: C.warn,
       angolo: o.depth > 1 ? { badge: o.depth } : { testo: "2 s" },
     });
   }
   const col = allow ? C.ok : C.bad;
-  return grandeKey({ ...comune, icona: allow ? "allow" : "deny", colIcona: col, tinta: col, forte: true, testo });
+  return grandeKey({ ...comune, forma, fondo: col, icona: segno, tinta: col, forte: true, testo });
 }
 
 // Il comando intero, per andare a capo invece di troncarlo a 14 caratteri.
@@ -780,7 +932,8 @@ function sceltaKey(numero, label, scelta, intestazione, cloud = false, phase = n
 // CONFERMA di una scelta multipla: risponde con le opzioni spuntate.
 function confermaKey(n, intestazione, cloud = false) {
   return grandeKey({
-    icona: "allow", colIcona: n ? C.ask : SPENTO, tinta: n ? C.ask : null, forte: !!n, cloud,
+    forma: "tessera", fondo: n ? C.ask : TESSERA_SPENTA, ink: n ? undefined : C.spento, icona: "allow",
+    tinta: n ? C.ask : null, forte: !!n, cloud,
     testo: ["CONFERMA"], testo2: n ? `${n} ${n === 1 ? "scelta" : "scelte"}` : "nessuna scelta", col2: n ? C.ask : C.dim,
     piede: String(intestazione || "domanda").toUpperCase(),
   });
@@ -793,39 +946,45 @@ function vuotoKey() {
 
 // Il tasto centrale con 4 opzioni: fa vedere le altre due.
 function paginaKey(testo, sub, avanti = true, cloud = false) {
-  return grandeKey({ icona: avanti ? "arrowR" : "arrowL", colIcona: C.ask, tinta: C.ask, cloud, testo: [testo], piede: sub });
+  return grandeKey({ forma: "tessera", fondo: C.ask, icona: avanti ? "arrowR" : "arrowL", tinta: C.ask, cloud, testo: [testo], piede: sub });
 }
 
 // Il tasto centrale con 2 opzioni: la domanda. Premuto apre la sessione.
 function domandaKey(intestazione, testo, sub, cloud = false) {
   return grandeKey({
-    icona: "question", colIcona: C.ask, tinta: C.ask, cloud,
+    forma: "tessera", fondo: C.ask, icona: "question", tinta: C.ask, cloud,
     // In fondo, di quale sessione è la domanda: l'intestazione la portano già le opzioni.
     testo: aCapo(testo, 15, 3), ideale: 16, piede: sub || String(intestazione || "domanda").toUpperCase(),
   });
 }
 
 // Il tasto centrale con un permesso: che cosa si sta per approvare. Premuto apre la
-// sessione. Per Supabase il database nel colore del rischio: rosso una scrittura in
-// produzione, ambra su staging, blu una lettura.
+// sessione. La tessera è quella dello strumento (verde acqua il terminale, come la
+// scorciatoia Terminale); per Supabase il database nel colore del rischio: rosso una
+// scrittura in produzione, ambra su staging, blu una lettura.
 const INFO_TINTA = { prod: C.bad, staging: C.warn, legge: C.info };
-function infoKey(icona, righe, sub, tinta = null, opz = {}) {
+function infoKey(icona_, righe, sub, tinta = null, opz = {}) {
   const col = tinta ? INFO_TINTA[tinta] ?? null : null;
+  const spento = !col && opz.colIcona === SPENTO;
+  const fondo = col ?? (spento ? TESSERA_SPENTA : opz.colIcona ?? TESSERA.focus);
+  const base = { forma: "tessera", fondo, ink: spento ? C.spento : undefined, icona: icona_, cloud: opz.cloud, piede: sub, tinta: col };
   if (opz.testo2) {
-    return grandeKey({ icona, colIcona: col ?? C.ident.focus, tinta: col, forte: tinta === "prod", cloud: opz.cloud, testo: righe.slice(0, 1), testo2: opz.testo2, col2: col ?? C.dim, piede: sub });
+    return grandeKey({ ...base, forte: tinta === "prod", testo: righe.slice(0, 1), testo2: opz.testo2, col2: col ?? C.dim });
   }
-  return grandeKey({ icona, colIcona: col ?? opz.colIcona ?? C.ident.focus, tinta: col, cloud: opz.cloud, testo: righe, ideale: opz.ideale, piede: sub });
+  return grandeKey({ ...base, testo: righe, ideale: opz.ideale });
 }
 
-// L'icona del tasto centrale secondo lo strumento che chiede il permesso.
+// L'icona del tasto centrale secondo lo strumento che chiede il permesso, con la tessera
+// della scorciatoia che fa la stessa cosa: Bash quella del Terminale, un file quella dei
+// progetti, un agente quella della chat, un server MCP quella dei comandi su misura.
 function iconaStrumento(toolName) {
   const t = String(toolName ?? "");
-  if (t === "Bash") return ["code", C.ident.code];
-  if (t === "WebFetch" || t === "WebSearch") return ["web", C.ident.web];
-  if (["Edit", "Write", "Read", "NotebookEdit", "MultiEdit"].includes(t)) return ["file", C.ident.project];
-  if (t === "Task" || t === "Agent") return ["layers", C.ident.chat];
-  if (t.startsWith("mcp__")) return ["plug", C.ident.custom];
-  return ["custom", C.ident.custom];
+  if (t === "Bash") return ["code", TESSERA.code];
+  if (t === "WebFetch" || t === "WebSearch") return ["web", TESSERA.web];
+  if (["Edit", "Write", "Read", "NotebookEdit", "MultiEdit"].includes(t)) return ["file", TESSERA.project];
+  if (t === "Task" || t === "Agent") return ["layers", TESSERA.chat];
+  if (t.startsWith("mcp__")) return ["plug", TESSERA.custom];
+  return ["custom", TESSERA.custom];
 }
 
 export {
@@ -833,5 +992,5 @@ export {
   gaugeKey, linesKey, bigCountKey, burnKey, usageMeterKey, labelKey, actionKey,
   STATUS_LOOK, statusKey, APPROVE_LOOK, approveKey, fmtNum,
   aCapo, grandeKey, decisioneKey, opzioneKey, paginaKey, domandaKey, infoKey, iconaStrumento, SPENTO, selettoreKey,
-  sceltaKey, confermaKey, vuotoKey, postaKey, thecoreKey, icona, D as DISCORD,
+  sceltaKey, confermaKey, vuotoKey, postaKey, thecoreKey, icona, D as DISCORD, TESSERA, comeTitolo,
 };

@@ -4,7 +4,9 @@ import { viewFor, gaugeMode, modelListIndex, sessionEta, fmtAgo, fmtReset, tipoD
 
 // keyart returns a data URI, so decode before asserting. These tests deliberately
 // assert on the TEXT the key draws rather than on SVG structure: the text is the
-// user-visible contract, and it survives restyling.
+// user-visible contract, and it survives restyling. Le testate però cambiano maiuscole:
+// dal 09/11/2026 le scrive keyart come i nomi della terza pagina («This month», non
+// «THIS MONTH»), quindi le si confronta senza badare alle maiuscole.
 const NOW = 1_800_000_000_000;
 const text = (image) => decodeURIComponent(String(image).replace(/^data:image\/svg\+xml,/, ""));
 const drawn = (kind, env) => text(viewFor(kind, { now: NOW, ...env }).image);
@@ -241,7 +243,7 @@ test("the Model key shows position when several models are available", () => {
     usage: { models: [{ name: "Opus", pct: 10, resetsAt: null }, { name: "Sonnet", pct: 20, resetsAt: null }] },
   };
   const t = drawn("usage-model", { state, pressedModelIdx: 1 });
-  assert.match(t, /SONNET/);
+  assert.match(t, /sonnet/i);
   assert.match(t, /2\/2/);
 });
 
@@ -269,7 +271,7 @@ test("Usage shows -- with no data rather than a zero cost", () => {
 test("Usage renders cost and tokens views, and labels the window", () => {
   const state = { ...emptyState(), usageMeter: { month: { tokens: 5_000_000, cost: 3.5, in: 10, out: 20 } } };
   const cost = drawn("usage-meter", { state, settings: { window: "month" } });
-  assert.match(cost, /THIS MONTH/);
+  assert.match(cost, /this month/i);
   assert.match(cost, /\$3\.50/);
   assert.match(drawn("usage-meter", { state, settings: { window: "month" }, usageViewMode: "tokens" }), /5\.0M|5M/);
 });
@@ -336,7 +338,7 @@ test("nessun tasto disegna più una regola permanente: il centro è un tasto inf
   for (const kind of ["approve-allow", "approve-always", "approve-deny"]) {
     assert.equal(viewFor(kind, { state, now: NOW }).painted.rule, null, kind);
   }
-  assert.doesNotMatch(drawn("approve-always", { state }), /ALWAYS/);
+  assert.doesNotMatch(drawn("approve-always", { state }), /always/i);
   assert.match(drawn("approve-always", { state }), /npm test/);
 });
 
@@ -556,7 +558,7 @@ const dueSessioni = (scelta = null) => ({
 
 test("Focus dice a quale sessione risponde la riga in basso, e quante aspettano", () => {
   const t = drawn("focus-session", { state: dueSessioni() });
-  assert.match(t, /RISPONDI A/);
+  assert.match(t, /rispondi a/i);
   assert.match(t, /Mappa scuole/);
   assert.match(t, /1\/2/);
   assert.match(drawn("focus-session", { state: dueSessioni("b") }), /Compensi Master/);
@@ -580,7 +582,7 @@ test("il tasto Status della sessione a cui si risponde porta «RISPONDI», gli a
 });
 
 test("senza richieste Focus torna a essere Focus", () => {
-  assert.doesNotMatch(drawn("focus-session", { state: { ...emptyState(), sessions: [session()] } }), /RISPONDI A/);
+  assert.doesNotMatch(drawn("focus-session", { state: { ...emptyState(), sessions: [session()] } }), /rispondi a/i);
 });
 
 // ---------- scelta multipla sui tasti ----------

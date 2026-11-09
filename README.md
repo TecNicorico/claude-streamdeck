@@ -40,27 +40,31 @@ The sessions key shows an animated dot cycle while any session is actively worki
 
 ## How the keys are designed
 
-Three rules, so a glance at the deck tells you something without reading it.
+Every page speaks Discord's visual language — its grey background, a coloured tile with a
+white filled icon, a big white value, a muted line under it — so a deck that also carries
+Discord keys reads as one surface. Three rules sit on top, so a glance at the deck tells
+you something without reading it.
 
-![The eight shortcut keys, each with its own identity hue](docs/actions.png)
+![The eight shortcut keys, each with its own identity tile](docs/actions.png)
 
-**Colour means something, always.** Values are bone white; colour is reserved for state
-and for the three permission decisions. So any colour on the deck means something is
-happening. There is no decorative accent — five hues are already spent on state
-(working, needs-approval, input-needed, finished, over-budget), and every candidate for
-a sixth landed close enough to one of them to be confusable, especially for the ~8% of
-men with red-green colour blindness.
+**Colour means something, always — and it has two places.** The tile says *which* key
+this is: one fixed, dark identity colour per shortcut, never changing with state. The ring
+around the key, the badges, the value and the line under it say *what is happening*:
+Discord's presence colours (green done, yellow waiting on you, red broken or over the
+limit) plus blue for working and purple for a question. Values are white; only a number
+that crosses a threshold (a usage percentage) takes a state colour. The one exception is a
+session key: there the key *is* the state, so its tile takes the state's colour and icon.
 
-**A coloured cap means the press leaves the deck.** Keys that launch an app, focus a
-window or answer a permission prompt carry a tinted header cap and a glyph. Keys that
-only cycle or refresh what they already show carry neither. The cap is that key's own
-fixed hue and never changes with state, while state shows up as a glow around the whole
-key — different place, and far more saturated, so the two never get confused.
+**A tile means the press leaves the deck.** Keys that launch an app, focus a window or
+answer a permission prompt carry a coloured tile, like a Discord server. Keys that only
+cycle or refresh what they already show have a bare, muted icon, like a channel.
 
-**Shape carries what colour can't.** ALLOW, ALWAYS and DENY use a single rule, a double
-rule and a filled cap respectively, plus ✓ / ✓✓ / ✗ marks. Green and red are nearly
-identical to a red-green colour-blind eye, so the mark and the silhouette are what tell
-those three apart — the ones where a mis-press matters most.
+**Shape carries what colour can't.** Green and red are nearly identical to a red-green
+colour-blind eye, so the bottom row uses three silhouettes and three marks: Deny is an
+octagon with ✗, the centre key a rounded square with the requesting tool's icon, Allow a
+circle with ✓. An Allow that needs a 2-second hold (a production write) adds an amber arc
+around its circle and spells out the hold. Every session state has its own icon (alert,
+question, sparkle, check, moon), so you recognise it before you read it.
 
 Both images above are generated from the real renderers with `npm run showcase`, so they
 can't drift from the code. `docs/keys.svg` and `docs/actions.svg` are the crisp versions.

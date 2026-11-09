@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fit, fits, ruleLines, approveKey, usageMeterKey, statusKey, labelKey, actionKey, linesKey, burnKey, bigCountKey, gaugeKey, opzioneKey, paginaKey, domandaKey, infoKey, aCapo, decisioneKey, sceltaKey, confermaKey } from "../src/keyart.js";
+import { fit, fits, ruleLines, approveKey, usageMeterKey, statusKey, labelKey, actionKey, linesKey, burnKey, bigCountKey, gaugeKey, opzioneKey, paginaKey, domandaKey, infoKey, aCapo, decisioneKey, sceltaKey, confermaKey, selettoreKey, vuotoKey, iconaStrumento, SPENTO, C } from "../src/keyart.js";
 
 // Every key is 144 units wide. These tests exist because two strings shipped
 // overflowing it silently: the ALWAYS key's rule line measured 199 units (clipped on
@@ -15,7 +15,8 @@ function textExtents(dataUri) {
   const svg = decodeURIComponent(dataUri.replace(/^data:image\/svg\+xml,/, ""));
   const out = [];
   for (const m of svg.matchAll(/<text([^>]*)>([^<]*)<\/text>/g)) {
-    const attrs = m[1], body = m[2];
+    // Si misura il testo che si vede: «&&» è «&amp;&amp;» nell'SVG, ma sono due caratteri.
+    const attrs = m[1], body = m[2].replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
     if (!body.trim()) continue;
     const num = (k) => Number((attrs.match(new RegExp(`${k}="([^"]+)"`)) ?? [])[1]);
     // eslint-disable-next-line no-sparse-arrays -- default array; only [1] is read
@@ -23,7 +24,7 @@ function textExtents(dataUri) {
     const w = body.length * ADVANCE * num("font-size");
     const x = num("x");
     const left = anchor === "middle" ? x - w / 2 : anchor === "end" ? x - w : x;
-    out.push({ body, size: num("font-size"), y: num("y"), left, right: left + w });
+    out.push({ body, size: num("font-size"), y: num("y"), x, anchor, left, right: left + w });
   }
   return out;
 }
@@ -242,6 +243,106 @@ test("i tasti della terza pagina non escono dal riquadro, con i numeri più lung
     for (const tc of [{ dati: grande, at: 0, err: null }, { dati: grande, at: 0, okAt: 0, err: "rete" }, { dati: null, at: 0, err: "chiave" }, null]) {
       const v = vistaTheCore({ settings: { metrica }, tc, conf });
       assertInsideBox(thecoreKey(v), `thecore ${metrica} ${tc?.err ?? "ok"}`);
+    }
+  }
+});
+
+// ---------- il linguaggio di Discord sulle pagine di Claude (09/11/2026) ----------
+const svgDi = (uri) => decodeURIComponent(uri.replace(/^data:image\/svg\+xml,/, ""));
+// La sagoma grande della riga in basso, letta dalla geometria e mai dal colore: è ciò
+// che resta a chi non distingue il verde dal rosso, e in scala di grigi.
+function sagomaDi(uri) {
+  const svg = svgDi(uri);
+  if (/<circle cx="72" cy="35" r="22"/.test(svg)) return "tondo";
+  if (/<rect x="50" y="13" width="44" height="44"/.test(svg)) return "tessera";
+  for (const m of svg.matchAll(/<path d="M([^"]+) Z"[^>]*stroke-linejoin="round"/g)) {
+    if (m[1].split(" L").length === 8) return "ottagono";
+  }
+  return null;
+}
+const SEGNO = { allow: "M5 12.8 L10 17.6 L19.4 7.2", deny: "M7 7 L17 17" };
+
+test("ALLOW, DENY e il tasto centrale si distinguono senza colore: sagoma e segno", () => {
+  const req = { id: 1, cwd: "/a/thecore-v2", toolName: "Bash", toolInput: { command: "npm test" } };
+  const [icona, tessera] = iconaStrumento("Bash");
+  const stati = [
+    ["in attesa", (k) => decisioneKey(k, req, { depth: 2, phase: 1 }), infoKey(icona, ["npm test"], "x", null, { colIcona: tessera })],
+    ["senza richieste", (k) => decisioneKey(k, null), infoKey("dot", [], "all clear", null, { colIcona: SPENTO })],
+    ["guasto", (k) => decisioneKey(k, null, { err: "port in use" }), infoKey("alert", ["—"], "port in use", "prod")],
+  ];
+  for (const [nome, decisione, centro] of stati) {
+    const allow = decisione("approve-allow"), deny = decisione("approve-deny");
+    assert.equal(sagomaDi(allow), "tondo", `ALLOW ${nome}`);
+    assert.equal(sagomaDi(deny), "ottagono", `DENY ${nome}`);
+    assert.equal(sagomaDi(centro), "tessera", `centro ${nome}`);
+    if (nome !== "guasto") {
+      assert.ok(svgDi(allow).includes(SEGNO.allow) && !svgDi(allow).includes(SEGNO.deny), `ALLOW ${nome}: la spunta`);
+      assert.ok(svgDi(deny).includes(SEGNO.deny) && !svgDi(deny).includes(SEGNO.allow), `DENY ${nome}: la croce`);
+    }
+  }
+});
+
+test("ALLOW a pressione lunga resta un altro tasto: l'arco, l'ambra e «tieni premuto»", () => {
+  const req = { id: 1, cwd: "/a/thecore-v2", toolName: "mcp__supabase__execute_sql", toolInput: { query: "delete" } };
+  const lungo = svgDi(decisioneKey("approve-allow", req, { lungo: true, target: "SQL DELETE" }));
+  const breve = svgDi(decisioneKey("approve-allow", req, { target: "SQL DELETE" }));
+  const arco = /A27 27 0 1 1/;
+  assert.match(lungo, arco);
+  assert.doesNotMatch(breve, arco);
+  assert.match(lungo, />tieni premuto 2 s</);
+  assert.match(lungo, new RegExp(`stroke="${C.warn}"`), "l'anello è ambra");
+  assert.doesNotMatch(breve, new RegExp(`stroke="${C.warn}"`));
+});
+
+test("ogni stato di una sessione ha la sua icona, e chi aspetta te respira", () => {
+  const STATI = ["needs-approval", "input-needed", "working", "finished", "idle", "none", "quiet", "unknown"];
+  // L'icona nella tessera in alto a sinistra, senza i colori: la forma da sola.
+  const iconaDi = (st) => {
+    const svg = svgDi(statusKey("thecore-v2", st, 1, ""));
+    const g = svg.match(/<g transform="translate\((16,15|18,17)\)[^>]*>(.*?)<\/g>/);
+    return g ? g[2].replace(/#[0-9a-f]{6}/gi, "") : null;
+  };
+  const icone = new Map(STATI.map((st) => [st, iconaDi(st)]));
+  for (const st of STATI) assert.ok(icone.get(st), `${st} senza icona`);
+  const cinque = ["needs-approval", "input-needed", "working", "finished", "idle"].map((st) => icone.get(st));
+  assert.equal(new Set(cinque).size, 5, "avviso, domanda, scintilla, spunta e luna sono cinque icone diverse");
+  // Le facce intere restano tutte diverse (le tre calme si distinguono anche per tessera e parola).
+  assert.equal(new Set(STATI.map((st) => statusKey("thecore-v2", st, 1, ""))).size, STATI.length);
+  for (const st of ["needs-approval", "input-needed"]) {
+    assert.notEqual(statusKey("x", st, 1, "", "", 0), statusKey("x", st, 1, "", "", 2), `${st} deve respirare`);
+  }
+});
+
+test("nessun testo delle pagine di Claude scende sotto i 13 px, tranne le etichette", () => {
+  const LUNGO = "un-nome-di-progetto-davvero-lunghissimo-che-non-finisce";
+  const req = { id: 1, cwd: "/a/" + LUNGO, toolName: "Bash", toolInput: { command: "npm run db:test:security && " + LUNGO }, cloud: true };
+  const keys = [
+    gaugeKey("SONNET 7D 2/2", 97, "$25 / $50 · 120%", 1), gaugeKey("WEEKLY", null, "sign in?"),
+    usageMeterKey("THIS MONTH", "$2399.28", "cost · " + LUNGO, true), usageMeterKey("7-DAY", "1.1B", "812M in · 300M out", false),
+    burnKey(43_800_000, "cap in ~2h 10m"), bigCountKey("CLAUDE CODE", 12, "3 needs you", C.warn, 1, C.warn, true),
+    linesKey("2/5", [{ text: LUNGO }, { text: "needs you", color: C.warn }, { text: "2h 5m old" }]),
+    actionKey("web", "claude.ai", LUNGO, LUNGO), labelKey("CLAUDE", "custom", "set command in settings"),
+    labelKey("FOCUS", LUNGO, LUNGO, C.warn, true),
+    selettoreKey(LUNGO, LUNGO, 2, 3, C.ask), selettoreKey(LUNGO, "", 1, 1),
+    decisioneKey("approve-allow", req, { depth: 12, label: LUNGO }), decisioneKey("approve-deny", req, { depth: 3 }),
+    decisioneKey("approve-allow", req, { lungo: true, target: "SQL DELETE" }),
+    infoKey("database", ["execute_sql"], LUNGO, "staging", { cloud: true, testo2: "STAGING · scrive" }),
+    infoKey("code", aCapo(req.toolInput.command, 15, 3), LUNGO, null, { colIcona: "#11806a", ideale: 18 }),
+    opzioneKey(4, "INTESTAZIONELUNGA", LUNGO, "2/3", 1, true), sceltaKey(2, LUNGO, false, "LINEE 1/2"), confermaKey(3, "LINEE 1/2"),
+    paginaKey("altre 2", "opzioni 3-4"), domandaKey("DEPLOY", LUNGO + " " + LUNGO, "1/2 · " + LUNGO), vuotoKey(),
+    approveKey("approve-always", null, {}), approveKey("approve-allow", req, { lungo: true, target: "SQL DELETE", depth: 3, label: "lab" }),
+  ];
+  for (const st of ["needs-approval", "input-needed", "working", "finished", "idle", "none", "quiet", "unknown"]) {
+    keys.push(statusKey(LUNGO, st, 4, "permission · 12s · " + LUNGO, "code", 1, "", true));
+    keys.push(statusKey(LUNGO, st, 1, "2/3 · " + LUNGO, "cloud", null, LUNGO + " " + LUNGO));
+  }
+  for (const k of keys) {
+    for (const t of textExtents(k)) {
+      // Le etichette: l'angolo in alto a destra («cli», «est»…), la pillola RISPONDI e il
+      // numero sull'angolo della tessera. Tutto il resto si legge a un braccio.
+      const etichetta = t.y <= 31 && (t.anchor === "end" || t.body === "RISPONDI" || t.x === 42);
+      if (!etichetta) assert.ok(t.size >= 13, `"${t.body}" a ${t.size} px`);
+      assertInsideBox(k, `13px ${t.body}`);
     }
   }
 });

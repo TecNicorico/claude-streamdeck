@@ -25,9 +25,10 @@ rediscover" doc. Keep it updated when you learn something the hard way.
   the `ps` output parsers.
 - `src/keyart.js` — every key's SVG, and the whole design system. Pure functions of
   their arguments, which is what lets `tools/gen-showcase.mjs` render the entire deck
-  outside the plugin. Read the header comment before changing anything visual: the three
-  rules there are each backed by a measurement, and two of them exist because the
-  obvious-looking alternative was tried and broke something. It renders glyphs for TWO
+  outside the plugin. Read the header comment before changing anything visual: the four
+  rules there (in Italian since the Discord restyle of 09/11/2026) each come from
+  something that broke, and the obvious-looking alternative to each was tried. It renders
+  glyphs for TWO
   surfaces with opposite rules — `iconSvg` for keys (filled plate, identity hues) and
   `listIconSvg` for the Stream Deck action list (monochrome white on transparent, which
   Elgato requires and CI enforces).
@@ -306,7 +307,9 @@ command passthrough in Claude Code).
   truncates and every string goes through it. `test/keyart.test.js` covers all three
   classes: box overflow, same-baseline collision, and square-cornered top fills. Add to
   it rather than trusting a screenshot.
-- **Colour in this plugin is a scarce resource** (2026-07-28). Five hues are spent on
+- **Colour in this plugin is a scarce resource** (2026-07-28; the mechanism is superseded
+  by the Discord restyle of 2026-11-09 — identity now lives on dark Discord role-colour
+  tiles, state on the ring — but the lesson in the last sentence still holds). Five hues are spent on
   state and three on the approve decisions; there is no room for a decorative accent, and
   the old Claude orange measured within 1.13:1 of the alarm red. Action-key identity works
   only because it uses *chroma* (~20 vs the state palette's 49-92) and a different
@@ -386,20 +389,54 @@ Guida utente: `DECK-REMOTO.md`, «La terza pagina». Per chi tocca il codice:
   `METRICHE_PI` del pannello: `test/thecore.test.js` confronta pannello e codice.
 - Una chiave rifiutata (401) **non tiene i numeri di prima**: una chiave revocata deve
   smettere di mostrare i dati. Un guasto di rete sì, con «offline · hh:mm».
-- **La terza pagina ha un linguaggio suo, quello di Discord** (chiesto il 09/11/2026:
-  «stesso stile di Discord»), perché sta accanto ai tasti di Discord e non a quelli di
-  Claude: `postaKey` e `thecoreKey` in `src/keyart.js` usano la tavolozza `D` (il fondo
-  #313338 di Discord), icone piene da 24 (`ICONE`, con i «tagli» nel colore del fondo
-  invece di un secondo colore) su una tessera del colore del GRUPPO, e lo stato in un
-  pallino sull'angolo (giallo da fare, rosso guasto). La posta usa il badge rosso delle
-  menzioni, grigio per un numero vecchio, e niente badge a zero. Le regole di
-  `keyart.js` per le pagine di Claude (banda = la pressione lascia il deck, nessun
-  colore decorativo) valgono lì e non qui: non «correggere» una pagina con l'altra. Le
-  decisioni di disegno stanno in `facciaPosta` (src/posta.js) e `vistaTheCore`
-  (src/thecore.js), testate; i renderer disegnano e basta. Le icone del plugin di
-  Discord non sono state viste (le pagine Elgato non erano raggiungibili): il linguaggio
-  è quello dell'app Discord. Prima versione col disegno delle altre pagine: con la
+- **Un linguaggio solo per tutte le pagine, quello di Discord.** Prima la terza pagina
+  (09/11/2026: «stesso stile di Discord», perché sta accanto ai tasti di Discord), poi, lo
+  stesso giorno, le pagine di Claude «come la terza». Fondo #313338, icone piene da 24
+  (`ICONE` in `src/keyart.js`, con i «tagli» nel colore del fondo invece di un secondo
+  colore), tessere colorate, valori bianchi, una riga tenue sotto a y=126. Le regole sono in
+  cima a `keyart.js` e valgono per tutte le pagine:
+  - la TESSERA dice CHI è il tasto e non cambia mai con lo stato: sulla terza pagina il
+    gruppo, sulle pagine di Claude la scorciatoia (`TESSERA`: le tinte scure dei ruoli di
+    Discord, il blurple per la chat). L'ANELLO intorno al tasto, il pallino, il numerino, il
+    valore e la riga sotto dicono lo STATO, coi colori di presenza di Discord più blu (al
+    lavoro) e viola (una domanda). Eccezione dichiarata: il tasto di una sessione, dove il
+    tasto È lo stato, ha nella tessera il colore e l'icona dello stato;
+  - una tessera vuol dire che la pressione esce dal deck (scorciatoie, sessioni, riga in
+    basso); i tasti che mostrano e basta hanno l'icona nuda e il titolo tenue, come un
+    canale. Sulla terza pagina ogni tasto apre qualcosa, e ognuno ha la sua tessera;
+  - la riga in basso si distingue senza colore, per sagoma e segno: DENY ottagono con ✗, il
+    centro quadrato arrotondato con l'icona dello strumento, ALLOW tondo con ✓. ALLOW a
+    pressione lunga ha l'arco ambra intorno al tondo, l'anello ambra e «tieni premuto 2 s».
+
+  La posta usa il badge rosso delle menzioni, grigio per un numero vecchio, e niente badge a
+  zero. Le decisioni di disegno della terza pagina stanno in `facciaPosta` (src/posta.js) e
+  `vistaTheCore` (src/thecore.js), testate; i renderer disegnano e basta. Le icone del
+  plugin di Discord non sono state viste (le pagine Elgato non erano raggiungibili): il
+  linguaggio è quello dell'app Discord. Prima versione col disegno delle altre pagine: con la
   cornice forte su ogni coda non vuota la pagina era ambra tutti i giorni.
+- **Il passaggio delle pagine di Claude ha toccato solo il disegno**: `view.js`, i
+  `painted`, le guardie delle pressioni e i tempi sono quelli di prima, e `postaKey`/
+  `thecoreKey` disegnano byte per byte come prima. Quattro cose da sapere prima di
+  ritoccarle:
+  - i titoli arrivano da `view.js` in maiuscolo e li riscrive `comeTitolo` («This month»,
+    come «Fatturato» sulla terza pagina): i test di `view.test.js` cercano le testate senza
+    badare alle maiuscole (`/this month/i`) — anche quelli che controllano che una testata
+    NON ci sia, che altrimenti passerebbero a vuoto;
+  - nessun testo scende sotto i 13 px (il tasto si vede a 72 px veri), tranne le etichette
+    d'angolo, la pillola RISPONDI e il numero sull'angolo della tessera. Una riga sotto che a
+    13 px non ci sta va a capo dove il tasto ha posto (`sotto(…, due)`, prima al «·») o si
+    tronca. Lo controlla `keyart.test.js`, insieme alle sagome e ai segni della riga in basso
+    letti senza colore e a un'icona diversa per ogni stato di sessione: i quattro test sono
+    rossi sul disegno di prima;
+  - «est» dei costi stimati è passato dall'angolo alla riga sotto («cost · est»), e il
+    selettore dice «1/2 · cambia»: accanto a tessera e titolo non c'era posto per l'uno, e a
+    13 px non ci stava «premi: cambia»;
+  - `C.ident` (le tinte pastello) serve solo all'arte di riserva del manifest e `C.rail` alla
+    scheda di `tools/gen-og.mjs`. Né `npm run icons` né `npm run og` sono stati rilanciati:
+    l'arte del manifest è ancora a tratto sul fondo vecchio, e `docs/og.png` mostra ancora il
+    vecchio disegno. Rasterizzando qui, resvg scrive il testo solo con
+    `font: { loadSystemFonts: true, defaultFontFamily: "Inter", sansSerifFamily: "Inter" }`:
+    così sono stati fatti `docs/keys.png` e `docs/actions.png` (1346 di larghezza).
 - Solo i tasti TheCore hanno lo slot della riga in basso (`TASTI_CON_SLOT`): la Posta
   no, perché premuta apre Gmail e un tocco per leggere la posta non deve diventare
   un'approvazione.
