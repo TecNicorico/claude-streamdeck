@@ -1,4 +1,5 @@
-// Le luci di Smart Life (Tuya) sul deck. Provato da test/luci.test.js.
+// Le luci di Smart Life (Tuya) sul deck, e la logica del tasto Luce comune a tutte le
+// fonti (pianoPer, vistaLuce; Alexa è in src/alexa.js). Provato da test/luci.test.js.
 //
 // Alexa non ha un modo ufficiale per comandare i dispositivi da un altro programma, e
 // le strade non ufficiali usano il login di Amazon e si rompono quando Amazon cambia.
@@ -238,52 +239,66 @@ const livelloDi = (settings) => {
   return Number.isFinite(n) && n >= 1 && n <= 100 ? Math.round(n) : 50;
 };
 
-// I comandi da mandare e lo stato atteso subito dopo (il tasto lo mostra senza
-// aspettare Tuya, poi rilegge quello vero). null = questa luce non sa farlo.
+// Che cosa deve cambiare e lo stato atteso subito dopo (il tasto lo mostra senza
+// aspettare, poi rilegge quello vero), per qualunque fonte: `cap` dice solo SE la luce
+// ha un interruttore e una luminosità. null = questa luce non sa farlo.
 //   interruttore  accesa ↔ spenta
 //   piu / meno    la luminosità di `passo` punti; «più» su una luce spenta la accende,
-//                 «meno» si ferma al minimo e non spegne (spegnere è dell'interruttore)
+//                 «meno» si ferma all'1% e non spegne (spegnere è dell'interruttore)
 //   livello       accende a `livello` %
-export function comandiPer(settings, stato, cap) {
+export function pianoPer(settings, stato, cap) {
   if (!cap) return null;
   const azione = azioneDi(settings);
   const acceso = stato?.acceso ?? null;
   const pct = stato?.pct ?? null;
-  const sw = cap.interruttore, br = cap.luminosita;
+  const sw = !!cap.interruttore, br = !!cap.luminosita;
   if (azione === "interruttore") {
     if (!sw) return null;
     const nuovo = acceso === false; // sconosciuto: si spegne, che è la cosa innocua
-    return { commands: [{ code: sw, value: nuovo }], atteso: { acceso: nuovo, pct } };
+    return { cambia: { acceso: nuovo }, atteso: { acceso: nuovo, pct } };
   }
   if (!br) return null;
   if (azione === "livello") {
     const p = livelloDi(settings);
-    return { commands: [...(sw ? [{ code: sw, value: true }] : []), { code: br.code, value: valoreDaPct(p, br) }], atteso: { acceso: true, pct: p } };
+    return { cambia: { ...(sw ? { acceso: true } : {}), pct: p }, atteso: { acceso: true, pct: p } };
   }
   const passo = passoDi(settings);
   const base = pct ?? 50;
   if (azione === "piu") {
     const p = acceso === false ? Math.max(base, passo) : Math.min(100, base + passo);
-    return { commands: [...(sw && acceso !== true ? [{ code: sw, value: true }] : []), { code: br.code, value: valoreDaPct(p, br) }], atteso: { acceso: true, pct: p } };
+    return { cambia: { ...(sw && acceso !== true ? { acceso: true } : {}), pct: p }, atteso: { acceso: true, pct: p } };
   }
-  // meno
   const p = Math.max(1, base - passo);
-  return { commands: [{ code: br.code, value: valoreDaPct(p, br) }], atteso: { acceso, pct: p } };
+  return { cambia: { pct: p }, atteso: { acceso, pct: p } };
+}
+
+// Lo stesso piano, nei comandi di Tuya: prima l'interruttore, poi la luminosità sul
+// suo intervallo.
+export function comandiPer(settings, stato, cap) {
+  const piano = pianoPer(settings, stato, cap);
+  if (!piano) return null;
+  const commands = [];
+  if (piano.cambia.acceso != null) commands.push({ code: cap.interruttore, value: piano.cambia.acceso });
+  if (piano.cambia.pct != null) commands.push({ code: cap.luminosita.code, value: valoreDaPct(piano.cambia.pct, cap.luminosita) });
+  return { commands, atteso: piano.atteso };
 }
 
 // ---------- che cosa mostra il tasto ----------
 // `rec` = { stato:{acceso,pct}, at, err, errTipo } per il dispositivo del tasto;
 // `dispositivo` = la voce dell'elenco (nome, online).
+// `conf.ok` dice se la fonte è pronta; `conf.messaggio`, se non lo è, cosa scrivere
+// (le chiavi di Tuya, l'accesso ad Amazon).
 export function vistaLuce({ settings = {}, dispositivo = null, rec = null, conf = { ok: false }, cap = null }) {
   const azione = azioneDi(settings);
   const nome = String(settings.label ?? "").trim() || dispositivo?.nome || "Luce";
   const sotto = azione === "piu" ? `+${passoDi(settings)}%` : azione === "meno" ? `−${passoDi(settings)}%`
     : azione === "livello" ? `al ${livelloDi(settings)}%` : null;
   const base = { azione, titolo: nome, breve: sotto ?? "Luce", acceso: null, valore: "--", sub: "", tono: null };
-  if (!conf.ok) return { ...base, sub: "chiavi Tuya?", tono: "attenzione" };
+  const manca = conf.messaggio ?? "chiavi Tuya?";
+  if (!conf.ok) return { ...base, sub: manca, tono: "attenzione" };
   if (!settings.dispositivo) return { ...base, sub: "scegli la luce" };
-  if (rec?.errTipo === "chiave") return { ...base, valore: "!", sub: "chiavi Tuya?", tono: "guasto" };
-  if (dispositivo && dispositivo.online === false) return { ...base, sub: "offline", tono: "attenzione" };
+  if (rec?.errTipo === "chiave" || rec?.errTipo === "accesso") return { ...base, valore: "!", sub: manca, tono: "guasto" };
+  if ((dispositivo && dispositivo.online === false) || (rec?.offline && !rec?.stato)) return { ...base, sub: "offline", tono: "attenzione" };
   const st = rec?.stato ?? null;
   if (!st) return { ...base, sub: rec?.err ? "non risponde" : "…", tono: rec?.err ? "attenzione" : null };
   const acceso = st.acceso;
@@ -291,5 +306,6 @@ export function vistaLuce({ settings = {}, dispositivo = null, rec = null, conf 
   const sub = sotto ?? (acceso === false ? "tocca per accendere" : acceso ? "tocca per spegnere" : "");
   const noCap = cap && ((azione === "interruttore" && !cap.interruttore) || (azione !== "interruttore" && !cap.luminosita));
   const breve = sotto ?? (acceso === false ? "Accendi" : acceso ? "Spegni" : "Luce");
-  return { ...base, breve, acceso, pct: acceso === false ? null : st.pct, valore, sub: noCap ? "non regolabile" : rec?.err ? "offline" : sub, tono: rec?.err || noCap ? "attenzione" : null };
+  const fuori = rec?.err || rec?.offline;
+  return { ...base, breve, acceso, pct: acceso === false ? null : st.pct, valore, sub: noCap ? "non regolabile" : fuori ? "offline" : sub, tono: fuori || noCap ? "attenzione" : null };
 }

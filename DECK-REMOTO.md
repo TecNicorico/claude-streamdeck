@@ -344,7 +344,44 @@ Claude può chiedere qualcosa**: dai a tre tasti TheCore della riga in basso la 
 della pagina di Claude), e la riga diventa quella delle risposte finché la richiesta
 è aperta, per tornare ai numeri subito dopo.
 
-## Le luci di Smart Life
+## Le luci e le prese, con Alexa
+
+Il tasto **Luce o presa** comanda i dispositivi della casa che comandi con Alexa — le
+luci (anche l'intensità) e le prese, per esempio quelle di una ciabatta — senza le app
+dei produttori. Accende e spegne, dà più o meno luce, o accende a una percentuale, e
+mostra se è acceso e quanto.
+
+Alexa non ha un modo ufficiale per farsi comandare da un altro programma: il plugin
+usa quello dell'app Alexa, con la libreria che usano ioBroker e Node-RED
+(`alexa-remote2`). Funziona da anni, ma Amazon può cambiare qualcosa: quando succede
+si aggiorna il plugin.
+
+1. Trascina **Luce o presa** su un tasto e apri le sue impostazioni. **Da dove**:
+   **Alexa**.
+2. In fondo, **Alexa — condivisa**: scegli il tuo Amazon (di solito `amazon.it`) e
+   premi **Accedi ad Amazon**. Si apre nel browser una pagina del tuo PC
+   (`http://127.0.0.1:…`): fai il login ad Amazon come sempre, verifica in due
+   passaggi compresa. Finito, la pagina lo dice e la riga sotto il pulsante diventa
+   «Collegato · N dispositivi».
+3. In alto scegli **La luce o la presa** e cosa fa **Premuto**. Le prese accendono e
+   spengono; le luci regolabili anche l'intensità.
+
+Lo si fa una volta: la sessione si salva in `.agent-vitals\alexa.json` nella tua
+cartella utente e si rinnova da sola. **È l'accesso al tuo account Amazon**: quel
+file non si condivide. «Esci», nelle stesse impostazioni, lo cancella. Se cambi la
+password di Amazon il tasto dice «accedi ad Alexa»: si rifà l'accesso.
+
+- Lo stato si legge una volta al minuto, solo mentre la pagina è a schermo, e subito
+  dopo ogni pressione.
+- **«offline»**: Alexa non raggiunge il dispositivo (spento dall'interruttore, Wi-Fi,
+  il ponte della luce scollegato).
+- La pagina di accesso ascolta solo sul tuo PC e si chiude da sola dopo un quarto
+  d'ora se non la usi.
+
+## Le luci di Smart Life (in alternativa)
+
+Se le luci sono di Smart Life (Tuya), lo stesso tasto può parlare direttamente con
+Tuya: **Da dove** → **Smart Life (Tuya)**, con le chiavi di un progetto sviluppatore.
 
 Le luci e le strisce LED che comandi con Alexa si comandano anche dal deck, con il
 tasto **Luce (Smart Life)**: accende e spegne, dà più o meno luce, o accende a una

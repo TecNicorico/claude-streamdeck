@@ -9,8 +9,10 @@ import path from "node:path";
 import { spawn, execFile } from "node:child_process";
 import { escapeAppleScript, parseHotkey, hotkeyClause, classifyCustomCommand, parseKeychainToken, parsePsTree, hostAppForPid, focusStrategyForBundle, terminalFocusScript, parseProcStarts } from "./osa.js";
 import { letturaAutomatica, LETTURA_APPROVATA } from "../cloud/deck-hook.mjs";
+import AlexaRemote from "alexa-remote2";
+import { CasaAlexa, statoPer, azioniAlexa, dominioDi } from "./alexa.js";
 import {
-  TuyaCloud, confLuci, capacitaDa, statoDa, comandiPer,
+  TuyaCloud, confLuci, capacitaDa, statoDa, comandiPer, pianoPer,
   INTERVALLO_LUCI_MS, ELENCO_MS, RITARDO_ERRORE_LUCI_MS, RILETTURA_DOPO_MS,
 } from "./luci.js";
 import { letturaSonda, serveSonda, candidatiClaude, eSonda, rigaCmd, ARGOMENTI_SONDA, SONDA_TIMEOUT_MS, NOME_CARTELLA } from "./sonda.js";
@@ -37,6 +39,9 @@ import {
 const IS_MAC = process.platform === "darwin";
 
 
+// La versione del plugin, dal manifest accanto al bundle (per l'User-Agent di Alexa).
+let VERSIONE_PLUGIN = "0";
+try { VERSIONE_PLUGIN = JSON.parse(fs.readFileSync(path.join(process.cwd(), "manifest.json"), "utf8")).Version ?? "0"; } catch { /* fuori dallo Stream Deck */ }
 const CLAUDE_DIR = path.join(os.homedir(), ".claude");
 const CREDS_FILE = path.join(CLAUDE_DIR, ".credentials.json");
 const SESSIONS_DIR = path.join(CLAUDE_DIR, "sessions");
@@ -128,6 +133,9 @@ const state = {
   // per ognuna { stato:{acceso,pct}, at, err, errTipo }. errTipo/err in cima: un errore
   // che riguarda tutte (le chiavi).
   luci: { dispositivi: new Map(), elencoAt: 0, cap: new Map(), rec: new Map(), err: null, errTipo: null, erroreAt: 0 },
+  // Le luci e le prese di Alexa (src/alexa.js): lo stato dell'accesso ad Amazon, l'elenco
+  // e per ognuna { stato, offline, at, err, errTipo }.
+  alexa: { stato: "spento", url: null, err: null, dispositivi: new Map(), elencoAt: 0, rec: new Map(), errTipo: null, erroreAt: 0 },
   lastHeadChangeAt: 0,
   globalSettings: {},
   pluginUUID: null,
@@ -1817,7 +1825,10 @@ function clientTuya() {
   }
   return tuya;
 }
-const idLuciVisibili = () => new Set([...views.values()].filter((v) => v.kind === "luce" && v.settings?.dispositivo).map((v) => String(v.settings.dispositivo)));
+// La fonte di un tasto Luce: Alexa, se non è scritto Smart Life.
+const fonteDi = (settings) => (settings?.fonte === "tuya" ? "tuya" : "alexa");
+const idLuciVisibili = (fonte = "tuya") => new Set([...views.values()]
+  .filter((v) => v.kind === "luce" && v.settings?.dispositivo && fonteDi(v.settings) === fonte).map((v) => String(v.settings.dispositivo)));
 function erroreLuci(e) {
   const tipo = e?.tipo ?? "rete";
   const msg = String(e?.message ?? e);
@@ -1829,9 +1840,11 @@ async function capDi(c, id) {
   return state.luci.cap.get(id);
 }
 async function pollLuci({ forza = false, elenco = false, solo = null } = {}) {
+  pollAlexa({ forza, elenco, solo });
   const c = clientTuya();
-  const ids = solo ? new Set([solo]) : idLuciVisibili();
+  const ids = solo ? new Set([solo]) : idLuciVisibili("tuya");
   if (!c) { renderAll(["luce"]); return; }
+  if (!ids.size && ![...views.values()].some((v) => v.kind === "luce" && fonteDi(v.settings) === "tuya") && !elenco) return;
   if (!forza && !elenco && !ids.size && ![...views.values()].some((v) => v.kind === "luce")) return;
   if (luciInCorso) return;
   const L = state.luci;
@@ -1880,6 +1893,7 @@ async function pollLuci({ forza = false, elenco = false, solo = null } = {}) {
 const filaLuce = new Map(); // id -> Promise
 function premiLuce(context) {
   const settings = views.get(context)?.settings ?? {};
+  if (fonteDi(settings) === "alexa") return premiAlexa(context, settings);
   const id = settings.dispositivo ? String(settings.dispositivo) : null;
   const c = clientTuya();
   if (!c || !id) return showAlert(context);
@@ -1907,11 +1921,136 @@ function premiLuce(context) {
   filaLuce.set(id, giro.finally(() => { if (filaLuce.get(id) === giro) filaLuce.delete(id); }));
 }
 
-// L'elenco per il Property Inspector: id, nome, online, e se le chiavi vanno.
-function luciPerPI() {
+// ---------- Alexa (src/alexa.js) ----------
+// La sessione di Amazon sta in un file della cartella utente, non nelle impostazioni
+// dello Stream Deck: è un accesso all'account, e i profili si esportano.
+const DATI_DIR = path.join(os.homedir(), ".agent-vitals");
+const FILE_ALEXA = path.join(DATI_DIR, "alexa.json");
+let accessoChiesto = false, accessoTimer = null;
+const casa = new CasaAlexa({
+  AlexaRemote,
+  cartellaDati: DATI_DIR,
+  versione: VERSIONE_PLUGIN,
+  leggi: () => { try { return JSON.parse(fs.readFileSync(FILE_ALEXA, "utf8")); } catch { return null; } },
+  scrivi: (d) => {
+    try {
+      fs.mkdirSync(DATI_DIR, { recursive: true, mode: 0o700 });
+      fs.writeFileSync(FILE_ALEXA + ".nuovo", JSON.stringify(d), { mode: 0o600 });
+      fs.renameSync(FILE_ALEXA + ".nuovo", FILE_ALEXA);
+    } catch (e) { log("alexa: sessione non salvata:", String(e?.message ?? e)); }
+  },
+  cancella: () => { try { fs.rmSync(FILE_ALEXA, { force: true }); } catch { /* già via */ } },
+  quandoCambia: (c) => {
+    const A = state.alexa;
+    const prima = A.stato;
+    A.stato = c.stato; A.url = c.url; A.err = c.err;
+    if (prima !== c.stato) log(`alexa: ${c.stato}${c.err ? " — " + c.err : ""}`);
+    clearTimeout(accessoTimer);
+    if (c.stato === "accesso") {
+      // La pagina di accesso si apre da sola solo se l'ha chiesta la persona (il
+      // pulsante nel Property Inspector), e si chiude dopo un quarto d'ora.
+      if (accessoChiesto && c.url) { accessoChiesto = false; platform.openUrl(c.url).catch(() => {}); }
+      accessoTimer = setTimeout(() => { if (casa.stato === "accesso") { casa.ferma(); casa.imposta("spento"); } }, 15 * 60_000);
+    }
+    if (c.stato === "connesso") { A.errTipo = null; A.erroreAt = 0; pollAlexa({ elenco: true, forza: true }); }
+    renderAll(["luce"]);
+    avvisaPIAlexa();
+  },
+});
+let casaAvviata = false;
+// La cartella dei dati prima di ogni avvio: lì la libreria tiene anche l'identità del
+// suo «telefono» virtuale, che riusata non crea un dispositivo nuovo nell'account
+// Amazon a ogni accesso.
+const cartellaDati = () => { try { fs.mkdirSync(DATI_DIR, { recursive: true, mode: 0o700 }); } catch { /* c'è */ } };
+function avviaAlexa() {
+  if (casaAvviata) return;
+  casaAvviata = true;
+  cartellaDati();
+  casa.avvia({ dominio: dominioDi(state.globalSettings) });
+}
+const idAlexaVisibili = () => idLuciVisibili("alexa");
+let alexaInCorso = false;
+async function pollAlexa({ forza = false, elenco = false, solo = null } = {}) {
+  const A = state.alexa;
+  if (casa.stato !== "connesso") return;
+  const ids = solo ? new Set([solo]) : idAlexaVisibili();
+  if (!forza && !elenco && !ids.size) return;
+  if (alexaInCorso) return;
+  if (!forza && A.erroreAt && Date.now() - A.erroreAt < RITARDO_ERRORE_LUCI_MS) return;
+  alexaInCorso = true;
+  try {
+    if (elenco || !A.elencoAt || Date.now() - A.elencoAt > ELENCO_MS) {
+      const lista = await casa.dispositivi();
+      A.dispositivi = new Map(lista.map((d) => [d.id, d]));
+      A.elencoAt = Date.now();
+    }
+    const daLeggere = [...ids].filter((id) => forza || !(Date.now() - (A.rec.get(id)?.at ?? 0) < INTERVALLO_LUCI_MS));
+    if (daLeggere.length) {
+      const mappa = await casa.stati(daLeggere);
+      const t = Date.now();
+      for (const id of daLeggere) {
+        const r = statoPer(A.dispositivi.get(id) ?? { id }, mappa);
+        const prima = A.rec.get(id);
+        A.rec.set(id, { stato: r?.stato ?? prima?.stato ?? null, offline: !!r?.offline, at: t, err: r?.errore ?? null, errTipo: null });
+      }
+    }
+    A.err = null; A.errTipo = null; A.erroreAt = 0;
+  } catch (e) {
+    const tipo = e?.tipo ?? "rete";
+    if (A.err !== e?.message) log(`alexa: ${tipo}: ${e?.message ?? e}`);
+    A.err = String(e?.message ?? e); A.errTipo = tipo; A.erroreAt = Date.now();
+    for (const id of ids) A.rec.set(id, { ...(A.rec.get(id) ?? {}), at: Date.now(), err: A.err, errTipo: tipo });
+  } finally {
+    alexaInCorso = false;
+  }
+  renderAll(["luce"]);
+}
+function premiAlexa(context, settings) {
+  const id = settings.dispositivo ? String(settings.dispositivo) : null;
+  const A = state.alexa;
+  const d = id ? A.dispositivi.get(id) : null;
+  if (casa.stato !== "connesso" || !d) return showAlert(context);
+  const prima = filaLuce.get("alexa:" + id) ?? Promise.resolve();
+  const giro = prima.then(async () => {
+    const rec = A.rec.get(id);
+    const piano = pianoPer(settings, rec?.stato ?? null, d.cap);
+    if (!piano) { showAlert(context); return; }
+    A.rec.set(id, { ...(rec ?? {}), stato: piano.atteso, at: Date.now(), err: null, errTipo: null, offline: false });
+    renderAll(["luce"]);
+    try {
+      await casa.esegui(d.entityId, azioniAlexa(piano.cambia));
+    } catch (e) {
+      log(`alexa: comando non eseguito: ${e?.tipo ?? "rete"}: ${e?.message ?? e}`);
+      showAlert(context);
+    }
+    // Alexa aggiorna lo stato dopo che il dispositivo ha risposto: si rilegge fra poco.
+    setTimeout(() => pollAlexa({ forza: true, solo: id }), 2_500);
+  });
+  filaLuce.set("alexa:" + id, giro.finally(() => { if (filaLuce.get("alexa:" + id) === giro) filaLuce.delete("alexa:" + id); }));
+}
+// Il Property Inspector aperto su un tasto Luce riceve lo stato dell'accesso quando cambia.
+let piAlexa = null; // { context, action }
+function avvisaPIAlexa() {
+  if (piAlexa) send({ event: "sendToPropertyInspector", context: piAlexa.context, payload: { luci: luciPerPI("alexa") } });
+}
+
+// L'elenco per il Property Inspector: id, nome, online, e se la fonte è pronta.
+function luciPerPI(fonte = "tuya") {
+  if (fonte === "alexa") {
+    const A = state.alexa;
+    return {
+      fonte,
+      ok: A.stato === "connesso",
+      alexa: { stato: A.stato, url: A.url, err: A.err, dominio: dominioDi(state.globalSettings) },
+      err: A.err, errTipo: A.errTipo,
+      dispositivi: [...A.dispositivi.values()].map((d) => ({ id: d.id, nome: d.nome, online: d.online, categoria: d.categoria, regolabile: d.cap.luminosita }))
+        .sort((a, b) => a.nome.localeCompare(b.nome, "it")),
+    };
+  }
   const conf = confLuci(state.globalSettings);
   const L = state.luci;
   return {
+    fonte,
     ok: conf.ok,
     regione: conf.regione,
     err: L.err,
@@ -2061,6 +2200,7 @@ if (process.argv.includes("--selftest")) {
       renderApproveAll();
       renderAll(["posta", "thecore", "luce"]);
       if (clientTuya()) pollLuci({ elenco: !state.luci.elencoAt });
+      avviaAlexa();
       pollPosta();
       pollTheCore();
     } else if (event === "sendToPlugin" && action) {
@@ -2077,9 +2217,24 @@ if (process.argv.includes("--selftest")) {
       }
       if (msg.payload?.cmd === "getLuci") {
         // «Aggiorna» nel Property Inspector rilegge l'elenco; aprirlo no, se è fresco.
-        const rispondi = () => send({ event: "sendToPropertyInspector", context, payload: { luci: luciPerPI() } });
+        const fonte = msg.payload?.fonte === "tuya" ? "tuya" : "alexa";
+        if (fonte === "alexa") piAlexa = { context, action };
+        const rispondi = () => send({ event: "sendToPropertyInspector", context, payload: { luci: luciPerPI(fonte) } });
         rispondi();
-        if (clientTuya()) pollLuci({ elenco: !!msg.payload?.aggiorna || !state.luci.elencoAt, forza: !!msg.payload?.aggiorna }).then(rispondi, rispondi);
+        if (fonte === "tuya" && clientTuya()) pollLuci({ elenco: !!msg.payload?.aggiorna || !state.luci.elencoAt, forza: !!msg.payload?.aggiorna }).then(rispondi, rispondi);
+        if (fonte === "alexa" && casa.stato === "connesso") pollAlexa({ elenco: !!msg.payload?.aggiorna || !state.alexa.elencoAt, forza: !!msg.payload?.aggiorna }).then(rispondi, rispondi);
+      }
+      // L'accesso ad Amazon: dal pulsante del Property Inspector, mai da solo.
+      if (msg.payload?.cmd === "alexaAccedi") {
+        piAlexa = { context, action };
+        if (casa.stato === "accesso" && casa.url) platform.openUrl(casa.url).catch(() => {});
+        else { accessoChiesto = true; cartellaDati(); casa.avvia({ dominio: dominioDi(state.globalSettings), nuovoAccesso: true }); }
+      }
+      if (msg.payload?.cmd === "alexaEsci") {
+        casa.esci();
+        state.alexa = { ...state.alexa, dispositivi: new Map(), elencoAt: 0, rec: new Map(), errTipo: null, erroreAt: 0 };
+        renderAll(["luce"]);
+        avvisaPIAlexa();
       }
       if (msg.payload?.cmd === "getTheCore") {
         send({ event: "sendToPropertyInspector", context, payload: {

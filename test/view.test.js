@@ -639,21 +639,35 @@ test("il tasto Luce: nome, percentuale e barra accesa; «Spenta» senza barra; s
     rec: new Map([["d1", { stato: { acceso: true, pct: 60 }, at: NOW }]]),
   };
   const gs = { tuyaId: "cid", tuyaSecret: "s" };
-  const accesa = drawn("luce", { state: { ...emptyState(), globalSettings: gs, luci }, settings: { dispositivo: "d1" } });
+  const accesa = drawn("luce", { state: { ...emptyState(), globalSettings: gs, luci }, settings: { dispositivo: "d1", fonte: "tuya" } });
   // «Lampada studio» in testa non ci sta: in testa il gesto, il nome intero sotto.
   assert.match(accesa, />Spegni</);
   assert.match(accesa, />Lampada studio</);
   assert.match(accesa, /60%/);
   assert.match(accesa, /width="70"/, "la barra al 60% di 116 pixel");
   luci.rec.set("d1", { stato: { acceso: false, pct: 60 }, at: NOW });
-  const spenta = drawn("luce", { state: { ...emptyState(), globalSettings: gs, luci }, settings: { dispositivo: "d1" } });
+  const spenta = drawn("luce", { state: { ...emptyState(), globalSettings: gs, luci }, settings: { dispositivo: "d1", fonte: "tuya" } });
   assert.match(spenta, /Spenta/);
   assert.doesNotMatch(spenta, /width="70"/);
-  assert.match(drawn("luce", { state: emptyState(), settings: {} }), /chiavi Tuya\?/);
+  assert.match(drawn("luce", { state: emptyState(), settings: { fonte: "tuya" } }), /chiavi Tuya\?/);
+  // Senza fonte è Alexa, e senza accesso lo dice.
+  assert.match(drawn("luce", { state: emptyState(), settings: {} }), /accedi ad Alexa/);
   // Un nome corto resta in testa, con il gesto sotto.
   luci.dispositivi.set("d1", { id: "d1", nome: "Studio", online: true });
   luci.rec.set("d1", { stato: { acceso: true, pct: 60 }, at: NOW });
-  const corto = drawn("luce", { state: { ...emptyState(), globalSettings: gs, luci }, settings: { dispositivo: "d1" } });
+  const corto = drawn("luce", { state: { ...emptyState(), globalSettings: gs, luci }, settings: { dispositivo: "d1", fonte: "tuya" } });
   assert.match(corto, />Studio</);
   assert.match(corto, />tocca per spegnere</);
+});
+
+test("il tasto Luce con Alexa: lo stato dell'accesso, poi la presa accesa senza barra", () => {
+  const presa = { id: "SKILL_p1", entityId: "e1", nome: "Ciabatta 1", online: true, cap: { interruttore: true, luminosita: false } };
+  const alexa = (stato, rec) => ({ stato, dispositivi: new Map([[presa.id, presa]]), rec: new Map(rec ? [[presa.id, rec]] : []) });
+  const t = (a) => drawn("luce", { state: { ...emptyState(), alexa: a }, settings: { dispositivo: presa.id } });
+  assert.match(t(alexa("accesso")), /accedi ad Amazon/);
+  assert.match(t(alexa("avvio")), /collego Alexa/);
+  const accesa = t(alexa("connesso", { stato: { acceso: true, pct: null }, at: NOW }));
+  assert.match(accesa, />Accesa</);
+  assert.match(accesa, />Ciabatta 1</);
+  assert.doesNotMatch(accesa, /width="116" height="8"/, "una presa non ha la barra");
 });

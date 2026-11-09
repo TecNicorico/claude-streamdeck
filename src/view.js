@@ -384,6 +384,16 @@ export function viewFor(kind, env) {
     }
     case "luce": {
       const id = settings.dispositivo;
+      if (settings.fonte !== "tuya") {
+        const a = state.alexa ?? {};
+        const d = id ? a.dispositivi?.get?.(id) ?? null : null;
+        const messaggio = a.stato === "accesso" ? "accedi ad Amazon" : a.stato === "avvio" ? "collego Alexa…" : "accedi ad Alexa";
+        return img(luceKey(vistaLuce({
+          settings, conf: { ok: a.stato === "connesso", messaggio },
+          dispositivo: d, cap: d?.cap ?? null,
+          rec: id ? a.rec?.get?.(id) ?? (a.errTipo ? { errTipo: a.errTipo, err: a.err } : null) : null,
+        })));
+      }
       const l = state.luci ?? {};
       const v = vistaLuce({
         settings, conf: confLuci(state.globalSettings),

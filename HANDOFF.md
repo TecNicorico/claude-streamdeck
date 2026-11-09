@@ -556,3 +556,33 @@ Guida utente: `DECK-REMOTO.md`, «La terza pagina». Per chi tocca il codice:
   client at a fake Tuya for tests only.
 - Not tested against the real Tuya cloud from here (no account, no network to it):
   the fake in `test/luci.test.js` re-implements the signature check independently.
+
+## Lights and plugs through Alexa (1.17.0, 09/11/2026)
+
+- Enrico's devices turned out to be an AwoX light (Bluetooth mesh behind an AwoX/EGLO
+  Wi-Fi bridge and the AwoX cloud: no public API, no realistic local path) and a Meross
+  power strip. One Alexa account covers both, so the Luce key gained a source,
+  `settings.fonte`: `alexa` (default) or `tuya`. `pianoPer` in `src/luci.js` is the
+  source-agnostic press plan (`cambia` + `atteso`); `comandiPer` turns it into Tuya
+  codes, `azioniAlexa` (`src/alexa.js`) into Alexa parameters.
+- `src/alexa.js` wraps `alexa-remote2` 8.1.1 (pinned; bundled by esbuild, the bundle
+  is ~2.6 MB): devices from `getSmarthomeDevicesV2` (`/nexus/v1/graphql`), state from
+  `querySmarthomeDevices` (`/api/phoenix/state`, by applianceId; the answer can come
+  back under the applianceId, the entityId or a merged id — `statoPer` tries all,
+  like ioBroker.alexa2), control from `executeSmarthomeDeviceAction` with the
+  entityId: `turnOn`/`turnOff`, `setBrightness` with brightness as a FRACTION string
+  ("0.5"), as ioBroker sends it. A control answer counts only with `code: SUCCESS`.
+- Login: `alexa-cookie2`'s proxy, forced to `proxyListenBind: 127.0.0.1` (the library
+  default is 0.0.0.0 — Amazon's login page open to the LAN), random port, opened in
+  the browser only from the PI button, closed after 15 minutes. The registration
+  (refresh token, cookies, macDms) is saved to `~/.agent-vitals/alexa.json` (0600),
+  never in Stream Deck settings; the library refreshes it every 4 days and the
+  plugin re-saves it on each `cookie` event. **No logger is passed**: alexa-remote2
+  logs the whole registration (tokens) and agent-vitals.log is the file README asks
+  users to share. `apiUserAgentPostfix` is set because without it the library
+  `require`s a package.json that does not exist inside the bundle.
+- `npm audit` reports `cookie <0.7` (low) through alexa-cookie2: name/path validation
+  of cookies the library sets itself; not reachable with untrusted input here.
+- Tested with a fake `AlexaRemote` (`test/alexa.test.js`) and, for the login start,
+  with the real bundled library (the proxy came up on 127.0.0.1). Not tested against
+  Amazon: no account and no network to it from the build container.

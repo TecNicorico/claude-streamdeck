@@ -1,6 +1,6 @@
 {
   "name": "agent-vitals",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "private": true,
   "type": "module",
   "description": "Stream Deck plugin: Claude usage, active sessions, and shortcuts",
@@ -17,6 +17,7 @@
     "og": "node tools/gen-og.mjs"
   },
   "dependencies": {
+    "alexa-remote2": "8.1.1",
     "ws": "^8.18.0"
   },
   "devDependencies": {

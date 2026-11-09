@@ -106,7 +106,11 @@ const FIELDS = {
   ],
   // Le luci di Smart Life (src/luci.js).
   "dev.tapparello.agent-vitals.luce": [
-    { key: "dispositivo", type: "luceselect", label: "La luce" },
+    { key: "fonte", type: "select", label: "Da dove", default: "alexa", options: [
+      { value: "alexa", label: "Alexa (tutti i dispositivi della casa)" },
+      { value: "tuya", label: "Smart Life (Tuya)" },
+    ] },
+    { key: "dispositivo", type: "luceselect", label: "La luce o la presa" },
     { key: "azione", type: "select", label: "Premuto", default: "interruttore", options: [
       { value: "interruttore", label: "Accende e spegne" },
       { value: "piu", label: "Più luce" },
@@ -220,7 +224,7 @@ function build() {
         for (const d of luciInfo?.dispositivi ?? []) {
           const o = document.createElement("option");
           o.value = d.id;
-          o.textContent = d.nome + (d.online === false ? " (offline)" : "");
+          o.textContent = d.nome + (d.online === false ? " (offline)" : d.regolabile === false ? " (accende e spegne)" : "");
           sel.append(o);
         }
         // Una luce scelta prima e non più nell'elenco resta scelta, col suo id.
@@ -377,7 +381,14 @@ function build() {
   if (action === "dev.tapparello.agent-vitals.usage-meter") buildRates();
   if (RELAY_ACTIONS.includes(action)) buildRelay();
   if (action === THECORE_ACTION) buildTheCore();
-  if (action === LUCE_ACTION) buildLuci();
+  if (action === LUCE_ACTION) {
+    buildLuci();
+    const sf = [...document.querySelectorAll("#form select")][0];
+    if (sf) {
+      const prima = sf.onchange;
+      sf.onchange = () => { prima?.(); luciInfo = null; build(); };
+    }
+  }
   if (action === POSTA_ACTION) {
     // Cambiato l'indirizzo, il campo della password è di un'altra casella.
     const em = [...document.querySelectorAll("#form input[type=text]")][0];
@@ -391,7 +402,41 @@ const LUCE_ACTION = "dev.tapparello.agent-vitals.luce";
 const GS_ACTIONS = ["dev.tapparello.agent-vitals.usage-meter", "dev.tapparello.agent-vitals.usage-model", POSTA_ACTION, THECORE_ACTION, LUCE_ACTION];
 // Le luci: le chiavi del progetto Tuya, condivise da tutti i tasti Luce.
 let luciInfo = null, luciRiempi = null;
-function askLuci(aggiorna) { if (ws && action === LUCE_ACTION) ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd: "getLuci", aggiorna } })); }
+const fonteLuce = () => (settings.fonte === "tuya" ? "tuya" : "alexa");
+function askLuci(aggiorna) { if (ws && action === LUCE_ACTION) ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd: "getLuci", aggiorna, fonte: fonteLuce() } })); }
+const comandoAlexa = (cmd) => ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd } }));
+const DOMINI_AMAZON = ["amazon.it", "amazon.de", "amazon.fr", "amazon.es", "amazon.co.uk", "amazon.com"];
+// Alexa: l'accesso ad Amazon, condiviso da tutti i tasti Luce con fonte Alexa.
+function buildAlexa(box) {
+  const h = document.createElement("div"); h.className = "rateshead"; h.textContent = "Alexa — condivisa"; box.append(h);
+  const div = document.createElement("div"); div.className = "item";
+  const l = document.createElement("label"); l.textContent = "Il tuo Amazon";
+  const sel = document.createElement("select");
+  for (const d of DOMINI_AMAZON) { const o = document.createElement("option"); o.value = d; o.textContent = d; sel.append(o); }
+  sel.value = gs.alexaDominio ?? "amazon.it";
+  sel.onchange = () => { if (!gsReady) return; gs.alexaDominio = sel.value; ws.send(JSON.stringify({ event: "setGlobalSettings", context: piUuid, payload: gs })); };
+  div.append(l, sel);
+  box.append(div);
+  const a = luciInfo?.fonte === "alexa" ? luciInfo.alexa : null;
+  const riga = document.createElement("div"); riga.className = "item";
+  const accedi = document.createElement("button");
+  accedi.textContent = a?.stato === "accesso" ? "Apri la pagina di accesso" : a?.stato === "connesso" ? "Accedi di nuovo" : "Accedi ad Amazon";
+  accedi.onclick = () => { accedi.textContent = "…"; comandoAlexa("alexaAccedi"); };
+  riga.append(accedi);
+  if (a?.stato === "connesso") {
+    const esci = document.createElement("button");
+    esci.textContent = "Esci";
+    esci.onclick = () => comandoAlexa("alexaEsci");
+    riga.append(esci);
+  }
+  box.append(riga);
+  const st = document.createElement("div"); st.className = "cap"; st.id = "luciState";
+  st.textContent = statoLuci();
+  box.append(st);
+  const cap = document.createElement("div"); cap.className = "cap";
+  cap.textContent = "«Accedi» apre nel browser una pagina del tuo PC (127.0.0.1) dove fai il login ad Amazon come sempre, verifica in due passaggi compresa. La sessione resta in un file della tua cartella utente (.agent-vitals) e si rinnova da sola: è l'accesso al tuo account Amazon, non condividerlo. Non è un modo ufficiale: se Amazon cambia qualcosa, si aggiorna il plugin.";
+  box.append(cap);
+}
 const LUCI_FIELDS = [
   { key: "tuyaId", label: "Access ID (Client ID) del progetto Tuya", type: "text" },
   { key: "tuyaSecret", label: "Access Secret (Client Secret)", type: "password" },
@@ -401,6 +446,7 @@ function buildLuci() {
   let box = document.getElementById("luci");
   if (!box) { box = document.createElement("div"); box.id = "luci"; document.getElementById("form").append(box); }
   box.innerHTML = "";
+  if (fonteLuce() === "alexa") return buildAlexa(box);
   const h = document.createElement("div"); h.className = "rateshead"; h.textContent = "Smart Life (Tuya) — condivise"; box.append(h);
   const salva = () => { ws.send(JSON.stringify({ event: "setGlobalSettings", context: piUuid, payload: gs })); setTimeout(() => askLuci(true), 1500); };
   for (const f of LUCI_FIELDS) {
@@ -434,6 +480,14 @@ function buildLuci() {
 }
 function statoLuci() {
   if (!luciInfo) return "";
+  if (luciInfo.fonte === "alexa") {
+    const a = luciInfo.alexa ?? {};
+    if (a.stato === "connesso") return luciInfo.err ? `Collegato, ma Alexa non risponde: ${luciInfo.err}` : `Collegato · ${luciInfo.dispositivi.length} dispositivi`;
+    if (a.stato === "accesso") return "Fai il login nella pagina che si è aperta nel browser. Se non si è aperta: «Apri la pagina di accesso».";
+    if (a.stato === "avvio") return "Collego…";
+    if (a.stato === "errore") return `Non collegato: ${a.err}`;
+    return "Non collegato: «Accedi ad Amazon».";
+  }
   if (!luciInfo.ok) return "Mancano le chiavi.";
   if (luciInfo.errTipo === "chiave") return `Tuya rifiuta le chiavi: ${luciInfo.err}`;
   if (luciInfo.err) return `Tuya non risponde: ${luciInfo.err}`;
@@ -581,8 +635,12 @@ function connectElgatoStreamDeckSocket(port, uuid, evt, info, actionInfo) {
       return;
     }
     if (m.event === "sendToPropertyInspector" && m.payload?.luci) {
+      if ((m.payload.luci.fonte ?? "tuya") !== fonteLuce()) return;
+      const primaStato = luciInfo?.alexa?.stato;
       luciInfo = m.payload.luci;
       if (luciRiempi) luciRiempi();
+      // Lo stato dell'accesso cambia i pulsanti: si ridisegna la parte condivisa.
+      if (luciInfo.fonte === "alexa" && primaStato !== luciInfo.alexa?.stato && gsReady) buildLuci();
       const st = document.getElementById("luciState");
       if (st) st.textContent = statoLuci();
     }
