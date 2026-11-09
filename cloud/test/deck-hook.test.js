@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { gestisci, rispostaPerClaude, conHook, attesaS, sessioneDa, titoloDa, TITOLO_MAX } from "../deck-hook.mjs";
+import { gestisci, rispostaPerClaude, conHook, attesaS, sessioneDa, titoloDa, TITOLO_MAX, aggiorna } from "../deck-hook.mjs";
+import { mkdtempSync, writeFileSync as scrivi, readFileSync as leggi } from "node:fs";
+import { tmpdir } from "node:os";
 import { scriptSetup, moduloHook } from "../../tools/gen-setup.mjs";
 
 const radice = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -145,4 +147,34 @@ test("lo stato «lavora» porta il titolo al relay, gli altri eventi no", async 
   await gestisci({ hook_event_name: "Stop", cwd: "/home/user/thecore-v2" }, { env: ENV, fetchAttesa: f });
   assert.equal(chiamate[0].body.sessione.titolo, "Aggiungi il pulsante");
   assert.equal("titolo" in chiamate[1].body.sessione, false);
+});
+
+// ---------- l'hook si aggiorna da solo all'avvio della sessione ----------
+// L'ambiente cloud riusa un'istantanea dello script di setup (il registro di una sessione
+// dice «Restored saved setup»): l'hook scaricato lì resterebbe fermo per sempre.
+const HOOK_VERO = readFileSync(join(radice, "cloud", "deck-hook.mjs"), "utf8");
+const fileTemp = (contenuto) => { const f = join(mkdtempSync(join(tmpdir(), "deck-")), "deck-hook.mjs"); scrivi(f, contenuto); return f; };
+const risposta = (status, testo) => async () => ({ ok: status >= 200 && status < 300, status, text: async () => testo });
+
+test("all'avvio scarica dal relay la versione di adesso e si sostituisce", async () => {
+  const f = fileTemp("#!/usr/bin/env node\n// versione vecchia deck-hook.mjs\n");
+  assert.equal(await aggiorna(f, { env: ENV, scarica: risposta(200, HOOK_VERO) }), "aggiornato");
+  assert.equal(leggi(f, "utf8"), HOOK_VERO);
+  assert.equal(await aggiorna(f, { env: ENV, scarica: risposta(200, HOOK_VERO) }), "già aggiornato");
+});
+
+test("non si sostituisce mai con qualcosa che non è l'hook", async () => {
+  const vecchio = "#!/usr/bin/env node\n// deck-hook.mjs vecchio ma funzionante\nexport async function gestisci() {}\n";
+  const casi = [
+    [risposta(200, "<html>errore di Cloudflare</html>"), "non è l'hook"],
+    [risposta(200, HOOK_VERO.slice(0, 200)), "non è l'hook"],
+    [risposta(404, "non trovato"), "relay 404"],
+    [async () => { throw new Error("rete negata"); }, "non raggiungibile"],
+  ];
+  for (const [scarica, atteso] of casi) {
+    const f = fileTemp(vecchio);
+    assert.equal(await aggiorna(f, { env: ENV, scarica }), atteso);
+    assert.equal(leggi(f, "utf8"), vecchio, atteso);
+  }
+  assert.equal(await aggiorna(fileTemp(vecchio), { env: { ...ENV, DECK_RELAY_URL: "" }, scarica: risposta(200, HOOK_VERO) }), "senza relay");
 });

@@ -1,4 +1,4 @@
-# --- Stream Deck: hook delle sessioni cloud (generato da tools/gen-setup.mjs) ---
+# --- Stream Deck: hook delle sessioni cloud, setup v2 (generato da tools/gen-setup.mjs) ---
 # Scarica l'hook dal tuo relay e lo installa. Le chiavi NON stanno qui:
 # DECK_RELAY_URL e DECK_RELAY_TOKEN vanno nelle variabili d'ambiente.
 DECK_RELAY="https://claude-deck-relay.<tuo-nome>.workers.dev"

@@ -113,9 +113,10 @@ poi **Edit**:
    gestori di pacchetti.
 3. **Script di setup:** incolla in fondo queste righe, con l'indirizzo del tuo
    Worker al posto di quello d'esempio (sono anche in
-   [`cloud/setup-ambiente.sh`](cloud/setup-ambiente.sh)). A ogni avvio di una sessione
-   scaricano l'hook dal tuo relay e lo installano; le chiavi non stanno lì dentro.
+   [`cloud/setup-ambiente.sh`](cloud/setup-ambiente.sh)). Scaricano l'hook dal tuo
+   relay e lo installano; le chiavi non stanno lì dentro.
    ```bash
+   # --- Stream Deck: hook delle sessioni cloud, setup v2 ---
    DECK_RELAY="https://claude-deck-relay.<tuo-nome>.workers.dev"
    mkdir -p "$HOME/.claude/deck"
    if curl -fsSL --max-time 20 "$DECK_RELAY/v1/hook.mjs" -o "$HOME/.claude/deck/nuovo.mjs" && head -1 "$HOME/.claude/deck/nuovo.mjs" | grep -q '^#!/usr/bin/env node'; then
@@ -125,8 +126,12 @@ poi **Edit**:
      echo "deck: hook non scaricato da $DECK_RELAY" >&2
    fi
    ```
-   Siccome l'hook lo serve il relay, per aggiornarlo basta ripubblicare il relay
-   (`npx wrangler@4 deploy` dalla cartella `relay`): lo script non si ricopia.
+   **Attenzione: l'ambiente non riesegue lo script a ogni sessione.** Lo esegue una
+   volta, ne salva un'istantanea e fa partire da quella le sessioni dopo (nel registro
+   di una sessione: «Restored saved setup»). Per questo l'hook, all'avvio di ogni
+   sessione, si riscarica dal relay e usa la versione di adesso: per aggiornarlo basta
+   ripubblicare il relay (`npx wrangler@4 deploy` dalla cartella `relay`). Lo script va
+   ritoccato solo per rifare l'istantanea: cambiando anche solo la riga «setup v2».
 
 Vale per le sessioni nuove: quelle già aperte non cambiano.
 

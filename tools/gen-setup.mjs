@@ -11,12 +11,16 @@ import { dirname, join } from "node:path";
 const radice = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 export const SEGNAPOSTO_RELAY = "https://claude-deck-relay.<tuo-nome>.workers.dev";
+// L'ambiente cloud salva un'istantanea dello script di setup e la riusa: cambiare lo
+// script (anche solo questa riga) la fa rifare. Serve quando cambiano gli eventi a cui
+// l'hook è iscritto; per il resto l'hook si aggiorna da solo all'avvio di ogni sessione.
+export const VERSIONE_SETUP = 2;
 
 // `relay` è l'indirizzo del Worker: non è un segreto, e lo script di setup non può
 // leggerlo dalle variabili d'ambiente, quindi ci va scritto dentro.
 export function scriptSetup(relay = SEGNAPOSTO_RELAY) {
   return [
-    "# --- Stream Deck: hook delle sessioni cloud (generato da tools/gen-setup.mjs) ---",
+    `# --- Stream Deck: hook delle sessioni cloud, setup v${VERSIONE_SETUP} (generato da tools/gen-setup.mjs) ---`,
     "# Scarica l'hook dal tuo relay e lo installa. Le chiavi NON stanno qui:",
     "# DECK_RELAY_URL e DECK_RELAY_TOKEN vanno nelle variabili d'ambiente.",
     `DECK_RELAY="${relay}"`,

@@ -19,9 +19,10 @@
 //
 // `node deck-hook.mjs --installa` scrive gli hook in ~/.claude/settings.json (lo usa lo
 // script di setup dell'ambiente) e lascia intatto tutto il resto del file.
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, basename } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const MARCA = "deck-hook.mjs";
 const EVENTI = { SessionStart: "avvio", UserPromptSubmit: "lavora", Stop: "fine", SessionEnd: "chiusa" };
@@ -141,6 +142,39 @@ export async function gestisci(payload, { env = process.env, fetchAttesa = chiam
   return null;
 }
 
+// ---------- aggiornamento ----------
+// L'ambiente cloud non riesegue lo script di setup a ogni sessione: lo esegue una volta,
+// ne salva un'istantanea, e le sessioni dopo partono da quella (nel registro di una
+// sessione: «Restored saved setup», «Setup script cached from previous run»). L'hook
+// scaricato dallo script resterebbe quindi fermo alla versione dell'istantanea, anche
+// dopo un `wrangler deploy`. Per questo all'avvio di ogni sessione l'hook si riscarica
+// dal relay e si sostituisce: da lì in poi la sessione usa la versione di adesso.
+// Si sostituisce solo con un file che sembra davvero l'hook; ogni guasto lascia quello
+// che c'era.
+export async function aggiorna(file, { env = process.env, scarica = fetch } = {}) {
+  const base = env.DECK_RELAY_URL;
+  if (!base || !/^https?:\/\//.test(base)) return "senza relay";
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), 5_000);
+  let testo;
+  try {
+    const r = await scarica(base.replace(/\/+$/, "") + "/v1/hook.mjs", { signal: ac.signal });
+    if (!r.ok) return "relay " + r.status;
+    testo = await r.text();
+  } catch {
+    return "non raggiungibile";
+  } finally {
+    clearTimeout(t);
+  }
+  if (!testo.startsWith("#!/usr/bin/env node") || !testo.includes(MARCA) || !testo.includes("export async function gestisci")) return "non è l'hook";
+  let attuale = "";
+  try { attuale = readFileSync(file, "utf8"); } catch {}
+  if (attuale === testo) return "già aggiornato";
+  writeFileSync(file + ".nuovo", testo);
+  renameSync(file + ".nuovo", file);
+  return "aggiornato";
+}
+
 // ---------- installazione: gli hook in ~/.claude/settings.json ----------
 export function conHook(settings, comando, attesa) {
   const out = settings && typeof settings === "object" ? { ...settings } : {};
@@ -184,6 +218,10 @@ async function principale() {
   if (process.argv.includes("--installa")) process.exit(installa());
   let payload = {};
   try { payload = JSON.parse(readFileSync(0, "utf8") || "{}"); } catch { return; }
+  // All'avvio della sessione, prima di tutto, la versione di adesso dal relay (vedi aggiorna).
+  const aggiornamento = payload?.hook_event_name === "SessionStart" && process.env.CLAUDE_CODE_REMOTE === "true"
+    ? aggiorna(fileURLToPath(import.meta.url)).catch(() => "errore")
+    : null;
   // Se Claude Code chiude l'hook mentre aspetta (la persona ha risposto su claude.ai),
   // prima di uscire lo dice al relay: la richiesta sparisce subito anche dal deck.
   const quandoAperta = (id, base, token) => {
@@ -191,6 +229,7 @@ async function principale() {
     for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.once(sig, esci);
   };
   const out = await gestisci(payload, { quandoAperta }).catch(() => null);
+  if (aggiornamento) await aggiornamento;
   if (out) process.stdout.write(JSON.stringify(out));
 }
 
