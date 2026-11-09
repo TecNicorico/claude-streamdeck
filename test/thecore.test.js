@@ -61,7 +61,8 @@ test("ogni metrica legge il riassunto e apre una pagina che esiste", () => {
   assert.deepEqual(METRICHE.notifiche.vista({ ...RIASSUNTO, personale: { notificheNonLette: 0, menzioniNonLette: 0 } }),
     { valore: "0", sub: "non lette", tono: null });
   // Un TheCore senza la 0157 non ha la parte personale: «--», non uno zero.
-  const { personale: _p, ...senzaPersonale } = RIASSUNTO;
+  const senzaPersonale = { ...RIASSUNTO };
+  delete senzaPersonale.personale;
   assert.equal(METRICHE.notifiche.vista(senzaPersonale).valore, "--");
   assert.deepEqual(METRICHE.ufficializzate_merch.vista(RIASSUNTO), { valore: "31", sub: "firmati su 300" });
   assert.deepEqual(METRICHE.ufficializzate_annuari.vista(RIASSUNTO), { valore: "22", sub: "firmati su 280" });

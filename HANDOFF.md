@@ -505,3 +505,30 @@ Guida utente: `DECK-REMOTO.md`, «La terza pagina». Per chi tocca il codice:
   ogni aggiornamento proprio quando serve — il primo giro dopo un'installazione prende
   facilmente un 429 dall'endpoint dei consumi, e senza l'ultima lettura i tasti
   restavano su «-- throttled» (09/11/2026).
+
+## Answered elsewhere, and reads that do not ask (1.15.0, 09/11/2026)
+
+- **Claude Code does not stop a PermissionRequest hook when the person answers on
+  claude.ai.** The hook runs with the TURN's abort signal, not the prompt's (seen in
+  2.1.319: `q3e(…, s.abortController.signal)`), and a late answer is ignored. So the
+  SIGTERM handler that sends `rinuncia` never fired and the request sat on the deck
+  for the whole hold (5 min). While it waits, the cloud hook now tails the session
+  transcript (`sorvegliaTranscript`): it finds the `tool_use` with the same tool and
+  input (key order ignored, `stabile`) that has no `tool_result` yet, and when that
+  `tool_result` appears — at once for a denial, when the tool finishes for an
+  approval — it calls `rinuncia`; the relay wakes the long poll with `sconosciuta`
+  and the hook exits without a decision. A deck decision that arrives after that is
+  not delivered. PostToolUse would have been the obvious signal, but a new hook
+  event needs the environment's setup snapshot redone; the transcript needs only a
+  `wrangler deploy`.
+- **Reads approve themselves** (`letturaAutomatica` in `cloud/deck-hook.mjs`, used by
+  the cloud hook and imported by the plugin for local sessions). Stricter than
+  `src/supabase.js`, which only picks tap vs. long press: one statement, a read
+  verb, no writing words, and every called function on an allowlist of read-only
+  Postgres built-ins — any other function, qualified or not, asks, because in
+  TheCore a SELECT can write (`fn_next_officialization_code`, `rpc_apri_scuola`).
+  Comments and strings are removed by a character lexer in Postgres order
+  (`sqlSenzaTesti`: nested `/* */`, `E'…'` with backslashes, `$tag$`); the old
+  regex chain turned `select '/*', 1; drop …; select '*/'` into one string, and
+  `src/supabase.js` now uses the same lexer. Off: `DECK_LETTURE_SQL=0` (cloud),
+  global setting `sqlLettureAuto: false` (PC).

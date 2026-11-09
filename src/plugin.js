@@ -7,8 +7,8 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn, execFile } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { escapeAppleScript, parseHotkey, hotkeyClause, classifyCustomCommand, parseKeychainToken, parsePsTree, hostAppForPid, focusStrategyForBundle, terminalFocusScript, parseProcStarts } from "./osa.js";
+import { letturaAutomatica, LETTURA_APPROVATA } from "../cloud/deck-hook.mjs";
 import { letturaSonda, serveSonda, candidatiClaude, eSonda, rigaCmd, ARGOMENTI_SONDA, SONDA_TIMEOUT_MS, NOME_CARTELLA } from "./sonda.js";
 import { usageDaRisposta, percorsiDesktop, letturaDesktop, formaDesktop, letturaStatusline, rigaStatusline, statuslineFragment, completa, serveEndpoint, ritardoDopo429, API_BASE_MS } from "./consumi.js";
 import { windowStartMs, parseRequests, mergeById, aggregate, aggregateByModel, budgetPct, localDay, newDayCounts, foldDayChunk, dayCountsTotals } from "./usage.js";
@@ -32,7 +32,6 @@ import {
 
 const IS_MAC = process.platform === "darwin";
 
-const PLUGIN_DIR = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 const CLAUDE_DIR = path.join(os.homedir(), ".claude");
 const CREDS_FILE = path.join(CLAUDE_DIR, ".credentials.json");
@@ -581,6 +580,13 @@ function onHookRequest(payload, ticket) {
   const toolName = String(payload?.tool_name ?? "");
   log(`approve: ${toolName} from ${path.basename(String(payload?.cwd ?? ""))}`);
   if (payload?.hook_event_name !== "PermissionRequest" || !toolName) return void ticket.respond(null);
+  // Una lettura su Supabase si approva da sola, con la stessa regola dell'hook delle
+  // sessioni cloud (cloud/deck-hook.mjs): a nessuno serve un tasto per una SELECT.
+  // Si spegne dalle impostazioni dei tasti di approvazione (sqlLettureAuto: false).
+  if (state.globalSettings?.sqlLettureAuto !== false && letturaAutomatica(toolName, payload.tool_input)) {
+    log(`approve: ${toolName} is a read, approved by rule`);
+    return void ticket.respond(LETTURA_APPROVATA);
+  }
   if (!hasApproveKey()) return void ticket.respond(null); // zero added latency when unused
 
   const req = {

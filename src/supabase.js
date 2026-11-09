@@ -10,6 +10,8 @@
 //     una pressione di due secondi in più, quello dell'errore opposto una migration
 //     in produzione approvata con un tocco.
 
+import { sqlSenzaTesti } from "../cloud/deck-hook.mjs";
+
 // Strumenti del server MCP di Supabase che leggono e basta.
 export const SOLO_LETTURA = new Set([
   "list_projects", "get_project", "list_organizations", "get_organization", "list_tables",
@@ -27,21 +29,20 @@ const SQL_SCRIVE = /\b(insert|update|delete|merge|truncate|drop|alter|create|gra
 const SQL_EFFETTI = /\b(set_config|pg_terminate_backend|pg_cancel_backend|nextval|setval|pg_advisory\w*|lo_\w+|dblink\w*|pg_reload_conf|pg_switch_wal|pg_promote|pg_file_\w+|pg_read_\w+|pg_ls_\w+|pg_sleep\w*)\s*\(|\b[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*\s*\(/i;
 
 // Toglie commenti e stringhe, così una parola dentro un testo non fa scattare niente
-// (né in un senso né nell'altro).
+// (né in un senso né nell'altro). Lo stesso lettore carattere per carattere dell'hook
+// cloud: con le espressioni in fila `select '/*', 1; drop …; select '*/'` sembrava una
+// lettura sola. null = qualcosa non è chiuso.
 export function sqlNudo(sql) {
-  return String(sql ?? "")
-    .replace(/--[^\n]*/g, " ")
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/\$([A-Za-z_]*)\$[\s\S]*?\$\1\$/g, " '' ")
-    .replace(/'(?:[^']|'')*'/g, " '' ")
-    .replace(/"(?:[^"]|"")*"/g, " x ");
+  return sqlSenzaTesti(sql);
 }
 
 // Una query è una lettura se è UNA sola istruzione che comincia con select / with /
 // explain (senza analyze) / show / values / table, e non contiene parole che scrivono.
 export function sqlLegge(sql, troncato = false) {
   if (troncato) return false;
-  const nudo = sqlNudo(sql).trim().replace(/;\s*$/, "");
+  const senza = sqlNudo(sql);
+  if (senza == null) return false;
+  const nudo = senza.trim().replace(/;\s*$/, "");
   if (!nudo) return false;
   if (nudo.includes(";")) return false;
   if (!/^(select|with|explain|show|values|table)\b/i.test(nudo)) return false;
@@ -107,7 +108,7 @@ export function bersaglio(req, c) {
   if (!c) return null;
   const input = req?.toolInput ?? {};
   if (c.strumento === "execute_sql") {
-    const primo = sqlNudo(input.query).trim().split(/\s+/)[0] ?? "";
+    const primo = (sqlNudo(input.query) ?? String(input.query ?? "")).trim().split(/\s+/)[0] ?? "";
     return `SQL ${primo.toUpperCase()}`.trim();
   }
   if (c.strumento === "apply_migration" && input.name) return String(input.name);

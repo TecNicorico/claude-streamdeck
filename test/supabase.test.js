@@ -103,3 +103,11 @@ test("i riferimenti si scrivono separati da virgole o spazi", () => {
   assert.deepEqual(refs(" Abc, def;ghi  jkl "), ["abc", "def", "ghi", "jkl"]);
   assert.deepEqual(refs(undefined), []);
 });
+
+test("un falso commento non nasconde una seconda istruzione al classificatore del deck", async () => {
+  const { sqlLegge } = await import("../src/supabase.js");
+  assert.equal(sqlLegge("select '/*', 1; drop table t; select '*/'"), false);
+  assert.equal(sqlLegge("select '--', 1; drop table t"), false);
+  assert.equal(sqlLegge("select 'aperta"), false);
+  assert.equal(sqlLegge("select count(*) from t where x like '%;%'"), true);
+});

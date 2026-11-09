@@ -3717,7 +3717,6 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path3 from "node:path";
 import { spawn, execFile } from "node:child_process";
-import { fileURLToPath } from "node:url";
 
 // src/osa.js
 function escapeAppleScript(s) {
@@ -3872,6 +3871,704 @@ function focusStrategyForBundle(bundle) {
   if (base2 === "Visual Studio Code.app") return "vscode";
   return "app";
 }
+
+// cloud/deck-hook.mjs
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, statSync, openSync, readSync, closeSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, basename } from "node:path";
+import { fileURLToPath } from "node:url";
+var MARCA = "deck-hook.mjs";
+var EVENTI = { SessionStart: "avvio", UserPromptSubmit: "lavora", Stop: "fine", SessionEnd: "chiusa" };
+var ATTESA_DEFAULT_S = 300;
+var ATTESA_MAX_S = 600;
+var RIFIUTO = "Rifiutato dallo Stream Deck";
+function attesaS(env = process.env) {
+  const n = Number(env.DECK_ATTESA_S);
+  return Number.isFinite(n) && n >= 5 && n <= ATTESA_MAX_S ? Math.round(n) : ATTESA_DEFAULT_S;
+}
+function sessioneDa(payload, env = process.env) {
+  const idRemoto = env.CLAUDE_CODE_REMOTE_SESSION_ID || "";
+  const id = idRemoto || String(payload?.session_id ?? "");
+  if (!id) return null;
+  const cwd = String(payload?.cwd ?? "");
+  const out = { id, idRemoto, nome: basename(cwd) || "cloud", cwd };
+  const titolo = titoloDa(payload);
+  if (titolo) out.titolo = titolo;
+  return out;
+}
+var TITOLO_MAX = 60;
+function titoloDa(payload) {
+  if (payload?.hook_event_name !== "UserPromptSubmit") return "";
+  const riga = String(payload?.prompt ?? "").split("\n").map((r) => r.trim()).find(Boolean) ?? "";
+  if (!riga || riga.startsWith("/")) return "";
+  const t = riga.replace(/\s+/g, " ");
+  return t.length > TITOLO_MAX ? t.slice(0, TITOLO_MAX - 1).trimEnd() + "\u2026" : t;
+}
+function rispostaPerClaude(decisione, toolInput) {
+  const wrap2 = (d) => ({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: d } });
+  if (decisione?.tipo === "approva") return wrap2({ behavior: "allow" });
+  if (decisione?.tipo === "rifiuta") return wrap2({ behavior: "deny", message: RIFIUTO });
+  if (decisione?.tipo === "rispondi") {
+    const qs = Array.isArray(toolInput?.questions) ? toolInput.questions : [];
+    if (!qs.length) return null;
+    const answers = {};
+    for (const q of qs) {
+      const etichette = (q?.options ?? []).map((o) => o?.label);
+      const scelta = decisione.risposte?.[q?.question];
+      if (q?.multiSelect) {
+        if (!Array.isArray(scelta) || !scelta.length || new Set(scelta).size !== scelta.length) return null;
+        if (!scelta.every((x) => typeof x === "string" && etichette.includes(x))) return null;
+        answers[q.question] = scelta.join(", ");
+      } else {
+        if (typeof scelta !== "string" || !etichette.includes(scelta)) return null;
+        answers[q.question] = scelta;
+      }
+    }
+    return wrap2({ behavior: "allow", updatedInput: { ...toolInput, answers } });
+  }
+  return null;
+}
+var SUPABASE_LETTURA = /* @__PURE__ */ new Set([
+  "list_projects",
+  "get_project",
+  "list_organizations",
+  "get_organization",
+  "list_tables",
+  "list_extensions",
+  "list_migrations",
+  "get_logs",
+  "query_logs",
+  "get_advisors",
+  "get_project_url",
+  "get_anon_key",
+  "get_publishable_keys",
+  "list_edge_functions",
+  "get_edge_function",
+  "list_branches",
+  "search_docs",
+  "generate_typescript_types",
+  "get_cost",
+  "list_storage_buckets",
+  "get_storage_config"
+]);
+var PRIMA_DI_PARENTESI = /* @__PURE__ */ new Set([
+  "select",
+  "from",
+  "join",
+  "in",
+  "exists",
+  "any",
+  "all",
+  "some",
+  "values",
+  "over",
+  "filter",
+  "within",
+  "as",
+  "on",
+  "and",
+  "or",
+  "not",
+  "where",
+  "when",
+  "then",
+  "else",
+  "lateral",
+  "using",
+  "by",
+  "having",
+  "case",
+  "cast",
+  "array",
+  "row",
+  "is",
+  "like",
+  "ilike",
+  "between",
+  "union",
+  "intersect",
+  "except",
+  "explain",
+  "limit",
+  "offset",
+  "sets",
+  "rollup",
+  "cube",
+  "grouping",
+  "varchar",
+  "char",
+  "character",
+  "numeric",
+  "decimal",
+  "timestamp",
+  "timestamptz",
+  "time",
+  "bit",
+  "interval",
+  "float"
+]);
+var FUNZIONI_LETTURA = /* @__PURE__ */ new Set([
+  "count",
+  "sum",
+  "avg",
+  "min",
+  "max",
+  "coalesce",
+  "nullif",
+  "greatest",
+  "least",
+  "now",
+  "date_trunc",
+  "date_part",
+  "extract",
+  "to_char",
+  "to_date",
+  "to_timestamp",
+  "to_number",
+  "age",
+  "make_date",
+  "make_interval",
+  "make_timestamp",
+  "make_timestamptz",
+  "generate_series",
+  "timezone",
+  "lower",
+  "upper",
+  "initcap",
+  "length",
+  "char_length",
+  "octet_length",
+  "substring",
+  "substr",
+  "position",
+  "strpos",
+  "replace",
+  "translate",
+  "trim",
+  "btrim",
+  "ltrim",
+  "rtrim",
+  "split_part",
+  "concat",
+  "concat_ws",
+  "format",
+  "left",
+  "right",
+  "lpad",
+  "rpad",
+  "repeat",
+  "reverse",
+  "unaccent",
+  "regexp_replace",
+  "regexp_match",
+  "regexp_matches",
+  "regexp_split_to_array",
+  "regexp_split_to_table",
+  "regexp_count",
+  "regexp_like",
+  "starts_with",
+  "md5",
+  "encode",
+  "decode",
+  "string_to_array",
+  "array_to_string",
+  "string_to_table",
+  "round",
+  "floor",
+  "ceil",
+  "ceiling",
+  "trunc",
+  "abs",
+  "mod",
+  "power",
+  "sqrt",
+  "ln",
+  "log",
+  "exp",
+  "sign",
+  "div",
+  "width_bucket",
+  "percentile_cont",
+  "percentile_disc",
+  "mode",
+  "stddev",
+  "stddev_pop",
+  "stddev_samp",
+  "variance",
+  "var_pop",
+  "var_samp",
+  "corr",
+  "bool_and",
+  "bool_or",
+  "every",
+  "array_agg",
+  "string_agg",
+  "json_agg",
+  "jsonb_agg",
+  "json_object_agg",
+  "jsonb_object_agg",
+  "json_build_object",
+  "jsonb_build_object",
+  "json_build_array",
+  "jsonb_build_array",
+  "to_json",
+  "to_jsonb",
+  "row_to_json",
+  "array_to_json",
+  "json_array_length",
+  "jsonb_array_length",
+  "json_array_elements",
+  "jsonb_array_elements",
+  "json_array_elements_text",
+  "jsonb_array_elements_text",
+  "json_each",
+  "jsonb_each",
+  "json_each_text",
+  "jsonb_each_text",
+  "json_object_keys",
+  "jsonb_object_keys",
+  "json_typeof",
+  "jsonb_typeof",
+  "jsonb_set",
+  "jsonb_insert",
+  "jsonb_strip_nulls",
+  "jsonb_pretty",
+  "jsonb_path_query",
+  "jsonb_path_query_array",
+  "jsonb_path_query_first",
+  "jsonb_path_exists",
+  "jsonb_path_match",
+  "json_extract_path",
+  "jsonb_extract_path",
+  "json_extract_path_text",
+  "jsonb_extract_path_text",
+  "array_length",
+  "array_position",
+  "array_positions",
+  "array_remove",
+  "array_append",
+  "array_prepend",
+  "array_cat",
+  "array_upper",
+  "array_lower",
+  "cardinality",
+  "unnest",
+  "row_number",
+  "rank",
+  "dense_rank",
+  "lag",
+  "lead",
+  "first_value",
+  "last_value",
+  "nth_value",
+  "ntile",
+  "cume_dist",
+  "percent_rank",
+  "pg_size_pretty",
+  "pg_total_relation_size",
+  "pg_relation_size",
+  "pg_table_size",
+  "pg_indexes_size",
+  "pg_database_size",
+  "pg_column_size",
+  "pg_get_functiondef",
+  "pg_get_function_arguments",
+  "pg_get_function_result",
+  "pg_get_viewdef",
+  "pg_get_constraintdef",
+  "pg_get_indexdef",
+  "pg_get_triggerdef",
+  "pg_get_expr",
+  "pg_get_userbyid",
+  "pg_get_serial_sequence",
+  "format_type",
+  "obj_description",
+  "col_description",
+  "shobj_description",
+  "has_table_privilege",
+  "has_column_privilege",
+  "has_function_privilege",
+  "has_schema_privilege",
+  "has_sequence_privilege",
+  "pg_has_role",
+  "current_setting",
+  "version",
+  "pg_typeof",
+  "quote_ident",
+  "quote_literal",
+  "quote_nullable",
+  "to_regclass",
+  "to_regproc",
+  "to_regprocedure",
+  "to_regtype",
+  "pg_relation_filenode",
+  "pg_postmaster_start_time",
+  "pg_backend_pid",
+  "inet_client_addr",
+  "date",
+  "isfinite",
+  "justify_days",
+  "justify_hours",
+  "justify_interval",
+  "clock_timestamp",
+  "statement_timestamp",
+  "transaction_timestamp",
+  "array_dims",
+  "num_nulls",
+  "num_nonnulls"
+]);
+var SQL_SCRIVE_ANCHE_IN_SELECT = /\b(insert|update|delete|merge|truncate|drop|alter|create|grant|revoke|copy|call|into|vacuum|refresh|execute|prepare|reindex|cluster|listen|notify|unlisten)\b|\bcomment\s+on\b|\block\s+table\b|\bfor\s+(no\s+key\s+)?(update|share|key\s+share)\b/i;
+var IDENT = /[A-Za-z0-9_$]/;
+function sqlSenzaTesti(sql) {
+  const t = String(sql ?? "");
+  let out = "", i = 0;
+  while (i < t.length) {
+    const c = t[i], d = t[i + 1];
+    const primaIdent = i > 0 && IDENT.test(t[i - 1]);
+    if (c === "-" && d === "-") {
+      const nl = t.indexOf("\n", i);
+      i = nl < 0 ? t.length : nl;
+      out += " ";
+    } else if (c === "/" && d === "*") {
+      let livello = 1;
+      i += 2;
+      while (i < t.length && livello) {
+        if (t[i] === "/" && t[i + 1] === "*") {
+          livello++;
+          i += 2;
+        } else if (t[i] === "*" && t[i + 1] === "/") {
+          livello--;
+          i += 2;
+        } else i++;
+      }
+      if (livello) return null;
+      out += " ";
+    } else if (c === "'" || (c === "e" || c === "E") && d === "'" && !primaIdent) {
+      const conBarre = c !== "'";
+      i += conBarre ? 2 : 1;
+      let chiusa = false;
+      while (i < t.length) {
+        if (conBarre && t[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (t[i] === "'") {
+          if (t[i + 1] === "'") {
+            i += 2;
+            continue;
+          }
+          i++;
+          chiusa = true;
+          break;
+        }
+        i++;
+      }
+      if (!chiusa) return null;
+      out += " '' ";
+    } else if (c === '"') {
+      i++;
+      let chiusa = false;
+      while (i < t.length) {
+        if (t[i] === '"') {
+          if (t[i + 1] === '"') {
+            i += 2;
+            continue;
+          }
+          i++;
+          chiusa = true;
+          break;
+        }
+        i++;
+      }
+      if (!chiusa) return null;
+      out += " x ";
+    } else if (c === "$" && !primaIdent) {
+      const m = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(t.slice(i));
+      if (!m) {
+        out += c;
+        i++;
+        continue;
+      }
+      const fine = t.indexOf(m[0], i + m[0].length);
+      if (fine < 0) return null;
+      i = fine + m[0].length;
+      out += " '' ";
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return out;
+}
+function sqlSoloLettura(sql) {
+  const senza = sqlSenzaTesti(sql);
+  if (senza == null) return false;
+  const nudo = senza.trim().replace(/;\s*$/, "");
+  if (!nudo || nudo.includes(";")) return false;
+  if (/\$|\*\//.test(nudo)) return false;
+  if (!/^(select|with|explain|show|values|table)\b/i.test(nudo)) return false;
+  if (/^explain\b/i.test(nudo) && /\banaly[sz]e\b/i.test(nudo)) return false;
+  if (SQL_SCRIVE_ANCHE_IN_SELECT.test(nudo)) return false;
+  for (const m of nudo.matchAll(/([A-Za-z_][A-Za-z0-9_$]*)(\s*\.\s*[A-Za-z_][A-Za-z0-9_$]*)?\s*\(/g)) {
+    if (m[2]) return false;
+    const nome = m[1].toLowerCase();
+    if (!PRIMA_DI_PARENTESI.has(nome) && !FUNZIONI_LETTURA.has(nome)) return false;
+  }
+  return true;
+}
+function strumentoSupabase(toolName) {
+  const [pre, server, ...resto] = String(toolName ?? "").split("__");
+  if (pre !== "mcp" || !server || !resto.length || !/supabase/i.test(server)) return null;
+  return resto.join("__");
+}
+function letturaAutomatica(toolName, toolInput) {
+  const s = strumentoSupabase(toolName);
+  if (!s) return false;
+  if (s === "execute_sql") return sqlSoloLettura(toolInput?.query);
+  return SUPABASE_LETTURA.has(s);
+}
+var LETTURA_APPROVATA = { hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } };
+function stabile(v) {
+  if (Array.isArray(v)) return "[" + v.map(stabile).join(",") + "]";
+  if (v && typeof v === "object") return "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + stabile(v[k])).join(",") + "}";
+  return JSON.stringify(v ?? null);
+}
+function righeDa(testo) {
+  const out = [];
+  for (const riga of String(testo ?? "").split("\n")) {
+    if (!riga.trim()) continue;
+    try {
+      out.push(JSON.parse(riga));
+    } catch {
+    }
+  }
+  return out;
+}
+var blocchi = (r) => Array.isArray(r?.message?.content) ? r.message.content : [];
+function toolUseUguali(righe, toolName, toolInput) {
+  const voluto = stabile(toolInput ?? {});
+  const ids = [];
+  for (const r of righe) {
+    for (const b of blocchi(r)) {
+      if (b?.type === "tool_use" && b.name === toolName && stabile(b.input ?? {}) === voluto) ids.push(b.id);
+    }
+  }
+  return ids;
+}
+function risultatiIn(righe) {
+  const ids = /* @__PURE__ */ new Set();
+  for (const r of righe) for (const b of blocchi(r)) if (b?.type === "tool_result" && b.tool_use_id) ids.add(b.tool_use_id);
+  return ids;
+}
+var FS_VERO = { statSync, openSync, readSync, closeSync };
+function leggiDa(fs2, file, da, a) {
+  const n = Math.max(0, a - da);
+  if (!n) return "";
+  const buf = Buffer.alloc(n);
+  const fd = fs2.openSync(file, "r");
+  try {
+    fs2.readSync(fd, buf, 0, n, da);
+  } finally {
+    fs2.closeSync(fd);
+  }
+  return buf.toString("utf8");
+}
+function sorvegliaTranscript(file, toolName, toolInput, { quandoRisolta, ogniMs = 1500, coda = 512 * 1024, fs: fs2 = FS_VERO } = {}) {
+  if (!file || typeof quandoRisolta !== "function") return () => {
+  };
+  let fermata = false, timer = null, offset = 0, resto = "", mio = null;
+  const visti = /* @__PURE__ */ new Set();
+  const esamina = (righe) => {
+    for (const id of risultatiIn(righe)) visti.add(id);
+    if (!mio) mio = toolUseUguali(righe, toolName, toolInput).filter((id) => !visti.has(id)).pop() ?? null;
+    return !!mio && visti.has(mio);
+  };
+  const stop = () => {
+    fermata = true;
+    clearTimeout(timer);
+  };
+  try {
+    const size = fs2.statSync(file).size;
+    const da = Math.max(0, size - coda);
+    let testo = leggiDa(fs2, file, da, size);
+    if (da > 0) testo = testo.slice(testo.indexOf("\n") + 1);
+    offset = size;
+    esamina(righeDa(testo));
+  } catch {
+    return () => {
+    };
+  }
+  const giro = () => {
+    if (fermata) return;
+    try {
+      const size = fs2.statSync(file).size;
+      if (size < offset) {
+        offset = size;
+        resto = "";
+      }
+      if (size > offset) {
+        const testo = resto + leggiDa(fs2, file, offset, size);
+        offset = size;
+        const fine = testo.lastIndexOf("\n");
+        resto = fine < 0 ? testo : testo.slice(fine + 1);
+        if (esamina(righeDa(fine < 0 ? "" : testo.slice(0, fine)))) {
+          stop();
+          quandoRisolta();
+          return;
+        }
+      }
+    } catch {
+      stop();
+      return;
+    }
+    timer = setTimeout(giro, ogniMs);
+    timer.unref?.();
+  };
+  timer = setTimeout(giro, ogniMs);
+  timer.unref?.();
+  return stop;
+}
+async function chiama(base2, token, path4, body, ms) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), ms);
+  try {
+    const r = await fetch(base2.replace(/\/+$/, "") + path4, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ac.signal
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+async function gestisci(payload, { env = process.env, fetchAttesa = chiama, ora: ora3 = Date.now, quandoAperta = () => {
+}, sorveglia = sorvegliaTranscript } = {}) {
+  if (env.CLAUDE_CODE_REMOTE !== "true" && env.DECK_ANCHE_LOCALE !== "1") return null;
+  if (payload?.hook_event_name === "PermissionRequest" && env.DECK_LETTURE_SQL !== "0" && letturaAutomatica(payload.tool_name, payload.tool_input)) return LETTURA_APPROVATA;
+  const base2 = env.DECK_RELAY_URL, token = env.DECK_RELAY_TOKEN;
+  if (!base2 || !token || !/^https?:\/\//.test(base2)) return null;
+  const sessione2 = sessioneDa(payload, env);
+  if (!sessione2) return null;
+  const ev = payload?.hook_event_name;
+  if (EVENTI[ev]) {
+    await fetchAttesa(base2, token, "/v1/cloud/stato", { sessione: sessione2, evento: EVENTI[ev] }, 5e3);
+    return null;
+  }
+  if (ev !== "PermissionRequest" || !payload?.tool_name) return null;
+  const s = attesaS(env);
+  const aperta = await fetchAttesa(base2, token, "/v1/cloud/richiesta", {
+    sessione: sessione2,
+    tool: payload.tool_name,
+    input: payload.tool_input ?? {},
+    attesaS: s
+  }, 8e3);
+  if (!aperta?.id) return null;
+  quandoAperta(aperta.id, base2, token);
+  let altrove = false;
+  const ferma = sorveglia(payload.transcript_path, payload.tool_name, payload.tool_input ?? {}, {
+    quandoRisolta: () => {
+      altrove = true;
+      fetchAttesa(base2, token, "/v1/cloud/rinuncia", { id: aperta.id }, 5e3);
+    }
+  });
+  try {
+    const fine = ora3() + s * 1e3;
+    while (ora3() < fine && !altrove) {
+      const r = await fetchAttesa(base2, token, "/v1/cloud/attendi", { id: aperta.id }, 25e3);
+      if (r?.stato === "decisa") return altrove ? null : rispostaPerClaude(r.decisione, payload.tool_input ?? {});
+      if (r?.stato === "sconosciuta") return null;
+      if (!r) await new Promise((res) => setTimeout(res, 1e3));
+    }
+    if (!altrove) await fetchAttesa(base2, token, "/v1/cloud/rinuncia", { id: aperta.id }, 5e3);
+    return null;
+  } finally {
+    ferma();
+  }
+}
+async function aggiorna(file, { env = process.env, scarica = fetch } = {}) {
+  const base2 = env.DECK_RELAY_URL;
+  if (!base2 || !/^https?:\/\//.test(base2)) return "senza relay";
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), 5e3);
+  let testo;
+  try {
+    const r = await scarica(base2.replace(/\/+$/, "") + "/v1/hook.mjs", { signal: ac.signal });
+    if (!r.ok) return "relay " + r.status;
+    testo = await r.text();
+  } catch {
+    return "non raggiungibile";
+  } finally {
+    clearTimeout(t);
+  }
+  if (!testo.startsWith("#!/usr/bin/env node") || !testo.includes(MARCA) || !testo.includes("export async function gestisci")) return "non \xE8 l'hook";
+  let attuale = "";
+  try {
+    attuale = readFileSync(file, "utf8");
+  } catch {
+  }
+  if (attuale === testo) return "gi\xE0 aggiornato";
+  writeFileSync(file + ".nuovo", testo);
+  renameSync(file + ".nuovo", file);
+  return "aggiornato";
+}
+function conHook(settings, comando, attesa) {
+  const out = settings && typeof settings === "object" ? { ...settings } : {};
+  const hooks = out.hooks && typeof out.hooks === "object" ? { ...out.hooks } : {};
+  const nostro = (timeout, matcher) => ({ ...matcher != null ? { matcher } : {}, hooks: [{ type: "command", command: comando, timeout }] });
+  const evento = (nome, gruppo) => {
+    const altri = (Array.isArray(hooks[nome]) ? hooks[nome] : []).map((g) => ({ ...g, hooks: (g.hooks ?? []).filter((h) => !String(h?.command ?? "").includes(MARCA)) })).filter((g) => g.hooks.length);
+    hooks[nome] = [...altri, gruppo];
+  };
+  evento("PermissionRequest", nostro(Math.max(attesa, ATTESA_MAX_S) + 15, ""));
+  for (const nome of Object.keys(EVENTI)) evento(nome, nostro(10, null));
+  out.hooks = hooks;
+  return out;
+}
+function installa() {
+  const dir = join(homedir(), ".claude");
+  const file = join(dir, "settings.json");
+  mkdirSync(dir, { recursive: true });
+  let attuali = {};
+  if (existsSync(file)) {
+    try {
+      attuali = JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      process.stderr.write(`deck-hook: ${file} non \xE8 JSON valido, non lo tocco
+`);
+      return 1;
+    }
+  }
+  const comando = `node "$HOME/.claude/deck/${MARCA}"`;
+  writeFileSync(file, JSON.stringify(conHook(attuali, comando, attesaS()), null, 2) + "\n");
+  process.stdout.write(`deck-hook: hook installati in ${file}
+`);
+  return 0;
+}
+async function principale() {
+  if (process.argv.includes("--installa")) process.exit(installa());
+  let payload = {};
+  try {
+    payload = JSON.parse(readFileSync(0, "utf8") || "{}");
+  } catch {
+    return;
+  }
+  const aggiornamento = payload?.hook_event_name === "SessionStart" && process.env.CLAUDE_CODE_REMOTE === "true" ? aggiorna(fileURLToPath(import.meta.url)).catch(() => "errore") : null;
+  const quandoAperta = (id, base2, token) => {
+    const esci = () => {
+      chiama(base2, token, "/v1/cloud/rinuncia", { id }, 2e3).finally(() => process.exit(0));
+    };
+    for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.once(sig, esci);
+  };
+  const out = await gestisci(payload, { quandoAperta }).catch(() => null);
+  if (aggiornamento) await aggiornamento;
+  if (out) process.stdout.write(JSON.stringify(out));
+}
+if (process.argv[1] && basename(process.argv[1]) === MARCA) principale();
 
 // src/sonda.js
 var SONDA_MS = 10 * 6e4;
@@ -6135,11 +6832,13 @@ var SOLO_LETTURA = /* @__PURE__ */ new Set([
 var SQL_SCRIVE = /\b(insert|update|delete|merge|truncate|drop|alter|create|grant|revoke|copy|call|into|vacuum|refresh|lock|notify|execute|prepare)\b/i;
 var SQL_EFFETTI = /\b(set_config|pg_terminate_backend|pg_cancel_backend|nextval|setval|pg_advisory\w*|lo_\w+|dblink\w*|pg_reload_conf|pg_switch_wal|pg_promote|pg_file_\w+|pg_read_\w+|pg_ls_\w+|pg_sleep\w*)\s*\(|\b[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*\s*\(/i;
 function sqlNudo(sql) {
-  return String(sql ?? "").replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\$([A-Za-z_]*)\$[\s\S]*?\$\1\$/g, " '' ").replace(/'(?:[^']|'')*'/g, " '' ").replace(/"(?:[^"]|"")*"/g, " x ");
+  return sqlSenzaTesti(sql);
 }
 function sqlLegge(sql, troncato = false) {
   if (troncato) return false;
-  const nudo = sqlNudo(sql).trim().replace(/;\s*$/, "");
+  const senza = sqlNudo(sql);
+  if (senza == null) return false;
+  const nudo = senza.trim().replace(/;\s*$/, "");
   if (!nudo) return false;
   if (nudo.includes(";")) return false;
   if (!/^(select|with|explain|show|values|table)\b/i.test(nudo)) return false;
@@ -6147,7 +6846,7 @@ function sqlLegge(sql, troncato = false) {
   return !SQL_SCRIVE.test(nudo) && !SQL_EFFETTI.test(nudo);
 }
 var parti = (toolName) => String(toolName ?? "").split("__");
-function strumentoSupabase(toolName) {
+function strumentoSupabase2(toolName) {
   const [pre, server, ...resto] = parti(toolName);
   if (pre !== "mcp" || !server || !resto.length) return null;
   return /supabase/i.test(server) ? resto.join("__") : null;
@@ -6163,7 +6862,7 @@ function progettoDi(ref, conf) {
 function classifica(req, conf = {}) {
   const tool = String(req?.toolName ?? "");
   const input = req?.toolInput && typeof req.toolInput === "object" ? req.toolInput : {};
-  const s = strumentoSupabase(tool);
+  const s = strumentoSupabase2(tool);
   if (s) {
     const progetto = progettoDi(input.project_id ?? input.projectId ?? input.project_ref, conf);
     let scrive;
@@ -6185,7 +6884,7 @@ function bersaglio(req, c) {
   if (!c) return null;
   const input = req?.toolInput ?? {};
   if (c.strumento === "execute_sql") {
-    const primo = sqlNudo(input.query).trim().split(/\s+/)[0] ?? "";
+    const primo = (sqlNudo(input.query) ?? String(input.query ?? "")).trim().split(/\s+/)[0] ?? "";
     return `SQL ${primo.toUpperCase()}`.trim();
   }
   if (c.strumento === "apply_migration" && input.name) return String(input.name);
@@ -6519,7 +7218,6 @@ function rigaInBasso(kind, env) {
 
 // src/plugin.js
 var IS_MAC = process.platform === "darwin";
-var PLUGIN_DIR = path3.dirname(path3.dirname(fileURLToPath(import.meta.url)));
 var CLAUDE_DIR = path3.join(os.homedir(), ".claude");
 var CREDS_FILE = path3.join(CLAUDE_DIR, ".credentials.json");
 var SESSIONS_DIR = path3.join(CLAUDE_DIR, "sessions");
@@ -7007,6 +7705,10 @@ function onHookRequest(payload, ticket) {
   const toolName = String(payload?.tool_name ?? "");
   log(`approve: ${toolName} from ${path3.basename(String(payload?.cwd ?? ""))}`);
   if (payload?.hook_event_name !== "PermissionRequest" || !toolName) return void ticket.respond(null);
+  if (state.globalSettings?.sqlLettureAuto !== false && letturaAutomatica(toolName, payload.tool_input)) {
+    log(`approve: ${toolName} is a read, approved by rule`);
+    return void ticket.respond(LETTURA_APPROVATA);
+  }
   if (!hasApproveKey()) return void ticket.respond(null);
   const req = {
     id: ++approveSeq,

@@ -178,3 +178,186 @@ test("non si sostituisce mai con qualcosa che non è l'hook", async () => {
   }
   assert.equal(await aggiorna(fileTemp(vecchio), { env: { ...ENV, DECK_RELAY_URL: "" }, scarica: risposta(200, HOOK_VERO) }), "senza relay");
 });
+
+// ---------- le letture SQL non chiedono (09/11/2026) ----------
+import { sqlSoloLettura, letturaAutomatica, sorvegliaTranscript, toolUseUguali, LETTURA_APPROVATA } from "../deck-hook.mjs";
+import { appendFileSync } from "node:fs";
+
+const LETTURE = [
+  "select count(*) from public.engagement where season_id = 3",
+  "SELECT e.id, coalesce(e.prezzo, 0), jsonb_build_object('a', 1) FROM engagement e JOIN (select id from school_season) s ON s.id = e.school_season_id WHERE e.id IN (1, 2) AND exists (select 1) GROUP BY 1 ORDER BY 2 DESC LIMIT 10;",
+  "with a as (select 1 as n) select * from a",
+  "select date_trunc('day', created_at)::date, count(*) filter (where is_official) over (partition by sales_id) from engagement",
+  "select column_name, data_type from information_schema.columns where table_name = 'contact'",
+  "show search_path",
+  "explain (format json) select * from engagement",
+  "select pg_get_functiondef('app.is_staff'::regproc)",
+  "select * from comment where body like '%delete from%; drop table%'",
+  "select 1 -- ; drop table t\n",
+  "select 1 /* /* annidato */ ; drop table t; */",
+  "select E'a\\'; drop table t; --'",
+  "select $$a; drop table t$$",
+  "table season",
+];
+const SCRITTURE = [
+  // Una SELECT che scrive attraverso una funzione: in TheCore ce ne sono.
+  "select fn_next_officialization_code(3)",
+  "select rpc_apri_scuola(12, null)",
+  "select public.rpc_totali(3)",
+  "select app.apri_engagement(1, 2)",
+  "select \"rpc_apri_scuola\"(1)",
+  "select nextval('season_id_seq')",
+  "select set_config('request.jwt.claims', '', false)",
+  "select pg_terminate_backend(123)",
+  "select dblink_exec('dbname=x', 'drop table t')",
+  "select pg_read_file('/etc/passwd')",
+  "select pg_sleep(30)",
+  // Le scritture vere, anche dentro una CTE o dopo un punto e virgola.
+  "with x as (delete from t returning *) select * from x",
+  "select * into nuova from engagement",
+  "select * from engagement for update",
+  "select 1; delete from engagement",
+  "explain analyze delete from engagement",
+  "explain analyze select 1",
+  "insert into t values (1)",
+  "update t set a = 1",
+  "copy t to stdout",
+  "set role postgres",
+  "do $$ begin delete from t; end $$",
+  // Un falso commento o una falsa stringa che nascondono una seconda istruzione.
+  "select '/*', 1; drop table t; select '*/'",
+  "select '--', 1; drop table t",
+  "select a$x$ from t; drop table t; select $x$",
+  "select x from t where y = $1",
+  // Non chiusi.
+  "select 'aperta",
+  "select 1 /* aperto",
+  "",
+];
+
+test("letture SQL: si riconoscono quelle vere", () => {
+  for (const q of LETTURE) assert.equal(sqlSoloLettura(q), true, q);
+});
+
+test("letture SQL: una SELECT che scrive, o un trucco, non passa", () => {
+  for (const q of SCRITTURE) assert.equal(sqlSoloLettura(q), false, q);
+});
+
+test("letture SQL: solo gli strumenti di Supabase, e fra quelli solo i lettori", () => {
+  assert.equal(letturaAutomatica("mcp__Supabase__execute_sql", { project_id: "x", query: "select 1" }), true);
+  assert.equal(letturaAutomatica("mcp__supabase_prod__execute_sql", { query: "select 1" }), true);
+  assert.equal(letturaAutomatica("mcp__Supabase__execute_sql", { query: "delete from t" }), false);
+  assert.equal(letturaAutomatica("mcp__Supabase__list_tables", { project_id: "x" }), true);
+  assert.equal(letturaAutomatica("mcp__Supabase__get_logs", {}), true);
+  assert.equal(letturaAutomatica("mcp__Supabase__apply_migration", { query: "select 1" }), false);
+  assert.equal(letturaAutomatica("mcp__Supabase__deploy_edge_function", {}), false);
+  assert.equal(letturaAutomatica("mcp__Supabase__confirm_cost", {}), false, "è il consenso a una spesa");
+  assert.equal(letturaAutomatica("mcp__Postgres__query", { sql: "select 1" }), false);
+  assert.equal(letturaAutomatica("Bash", { command: "psql -c 'select 1'" }), false);
+});
+
+test("una lettura si approva subito, senza aprire niente sul relay", { timeout: 5000 }, async () => {
+  const { f, chiamate } = relayFinto({ "/v1/cloud/richiesta": { id: "r1" }, "/v1/cloud/attendi": { stato: "sconosciuta" } });
+  const out = await gestisci({ hook_event_name: "PermissionRequest", tool_name: "mcp__Supabase__execute_sql", tool_input: { project_id: "yejg", query: "select count(*) from contact" } }, { env: ENV, fetchAttesa: f, sorveglia: () => () => {} });
+  assert.deepEqual(out, LETTURA_APPROVATA);
+  assert.equal(chiamate.length, 0);
+  // Anche senza relay configurato.
+  const senzaRelay = { CLAUDE_CODE_REMOTE: "true" };
+  assert.deepEqual(await gestisci({ hook_event_name: "PermissionRequest", tool_name: "mcp__Supabase__list_tables", tool_input: {} }, { env: senzaRelay, fetchAttesa: f, sorveglia: () => () => {} }), LETTURA_APPROVATA);
+});
+
+test("una scrittura va al deck come prima, e DECK_LETTURE_SQL=0 spegne le letture automatiche", { timeout: 5000 }, async () => {
+  for (const [env, q] of [[ENV, "delete from contact"], [{ ...ENV, DECK_LETTURE_SQL: "0" }, "select 1"]]) {
+    const { f, chiamate } = relayFinto({ "/v1/cloud/richiesta": { id: "r1" }, "/v1/cloud/attendi": { stato: "decisa", decisione: { tipo: "approva" } } });
+    await gestisci({ hook_event_name: "PermissionRequest", tool_name: "mcp__Supabase__execute_sql", tool_input: { query: q } }, { env, fetchAttesa: f, sorveglia: () => () => {} });
+    assert.equal(chiamate[0].path, "/v1/cloud/richiesta", q);
+  }
+});
+
+// ---------- risolta altrove: il transcript ----------
+const riga = (o) => JSON.stringify(o) + "\n";
+const toolUse = (id, name, input) => riga({ type: "assistant", message: { content: [{ type: "tool_use", id, name, input }] } });
+const toolResult = (id, testo = "ok", isError = false) => riga({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content: testo, is_error: isError }] } });
+const aspetta = (ms) => new Promise((r) => setTimeout(r, ms));
+
+test("transcript: lo stesso input in un altro ordine di chiavi è lo stesso strumento", () => {
+  const righe = [JSON.parse(toolUse("t1", "Bash", { command: "ls", description: "x" }))];
+  assert.deepEqual(toolUseUguali(righe, "Bash", { description: "x", command: "ls" }), ["t1"]);
+  assert.deepEqual(toolUseUguali(righe, "Bash", { command: "ls -la", description: "x" }), []);
+});
+
+test("transcript: il risultato dello strumento chiesto ferma l'attesa, una volta sola", { timeout: 5000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "deck-transcript-"));
+  const file = join(dir, "s.jsonl");
+  const input = { project_id: "x", query: "delete from t where id = 1" };
+  // Prima: la stessa identica chiamata, già fatta e già risolta, e altre righe.
+  scrivi(file, toolUse("vecchia", "mcp__Supabase__execute_sql", input) + toolResult("vecchia") + riga({ type: "user", message: { content: "ciao" } }) + toolUse("mia", "mcp__Supabase__execute_sql", input));
+  let volte = 0;
+  const stop = sorvegliaTranscript(file, "mcp__Supabase__execute_sql", input, { quandoRisolta: () => volte++, ogniMs: 10 });
+  await aspetta(40);
+  assert.equal(volte, 0, "il risultato della chiamata vecchia non conta");
+  appendFileSync(file, toolResult("altra"));
+  await aspetta(40);
+  assert.equal(volte, 0, "il risultato di un altro strumento non conta");
+  // Rifiutata su claude.ai: il risultato è un errore, e arriva subito. Scritto in due
+  // pezzi, come può capitare a una riga lunga.
+  const r = toolResult("mia", "The user doesn't want to proceed with this tool use.", true);
+  appendFileSync(file, r.slice(0, 20));
+  await aspetta(30);
+  appendFileSync(file, r.slice(20));
+  await aspetta(60);
+  assert.equal(volte, 1);
+  appendFileSync(file, toolResult("mia"));
+  await aspetta(40);
+  assert.equal(volte, 1, "una volta sola");
+  stop();
+});
+
+test("transcript: il tool_use scritto dopo che l'hook è partito si trova lo stesso", { timeout: 5000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "deck-transcript-"));
+  const file = join(dir, "s.jsonl");
+  // La stessa chiamata fatta un'ora fa, già risolta: non è quella che si aspetta.
+  scrivi(file, toolUse("t1", "Bash", { command: "rm -rf build" }) + toolResult("t1") + riga({ type: "user", message: { content: "rifallo" } }));
+  let volte = 0;
+  const stop = sorvegliaTranscript(file, "Bash", { command: "rm -rf build" }, { quandoRisolta: () => volte++, ogniMs: 10 });
+  appendFileSync(file, riga({ type: "assistant", message: { content: [{ type: "text", text: "Rifaccio." }] } }));
+  await aspetta(40);
+  assert.equal(volte, 0, "il risultato della chiamata di prima non decide questa");
+  appendFileSync(file, toolUse("t9", "Bash", { command: "rm -rf build" }));
+  await aspetta(40);
+  assert.equal(volte, 0);
+  appendFileSync(file, toolResult("t9"));
+  await aspetta(40);
+  assert.equal(volte, 1);
+  stop();
+  // Un file che non c'è non rompe niente.
+  assert.equal(typeof sorvegliaTranscript(join(dir, "manca.jsonl"), "Bash", {}, { quandoRisolta: () => {} }), "function");
+});
+
+test("deciso su claude.ai: la richiesta si ritira dal relay e l'hook esce senza decidere", { timeout: 5000 }, async () => {
+  let sveglia;
+  const { f, chiamate } = relayFinto({
+    "/v1/cloud/richiesta": { id: "r7" },
+    // Il relay tiene l'attesa finché la richiesta non viene ritirata, poi risponde «sconosciuta».
+    "/v1/cloud/attendi": () => new Promise((res) => { sveglia = () => res({ stato: "sconosciuta" }); }),
+    "/v1/cloud/rinuncia": () => { sveglia?.(); return { ok: true }; },
+  });
+  let fermata = false;
+  const sorveglia = (file, tool, input, { quandoRisolta }) => { setTimeout(quandoRisolta, 20); return () => { fermata = true; }; };
+  const out = await gestisci({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "make" }, transcript_path: "/x.jsonl" }, { env: ENV, fetchAttesa: f, sorveglia });
+  assert.equal(out, null);
+  assert.deepEqual(chiamate.map((c) => c.path), ["/v1/cloud/richiesta", "/v1/cloud/attendi", "/v1/cloud/rinuncia"]);
+  assert.equal(fermata, true, "la sorveglianza si ferma con l'hook");
+});
+
+test("una decisione del deck arrivata dopo quella su claude.ai non si consegna", { timeout: 5000 }, async () => {
+  let risolvi;
+  const { f } = relayFinto({
+    "/v1/cloud/richiesta": { id: "r8" },
+    "/v1/cloud/attendi": () => new Promise((res) => { risolvi = res; }),
+    "/v1/cloud/rinuncia": { ok: true },
+  });
+  const sorveglia = (file, tool, input, { quandoRisolta }) => { setTimeout(() => { quandoRisolta(); risolvi({ stato: "decisa", decisione: { tipo: "approva" } }); }, 10); return () => {}; };
+  const out = await gestisci({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "make" } }, { env: ENV, fetchAttesa: f, sorveglia });
+  assert.equal(out, null);
+});

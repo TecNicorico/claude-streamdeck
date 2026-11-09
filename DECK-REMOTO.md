@@ -9,7 +9,8 @@ Questa versione del plugin aggiunge tre cose ad Agent Vitals:
    (approva / rifiuta) e domande a scelta di Claude (le opzioni vanno sui tasti).
 3. **Le richieste Supabase si leggono a colpo d'occhio**: strumento, progetto
    (PROD / STAGING) e se legge o scrive. Una scrittura su un progetto che non è di
-   staging chiede di **tenere premuto ALLOW per 2 secondi**.
+   staging chiede di **tenere premuto ALLOW per 2 secondi**. Una **lettura** non
+   arriva nemmeno: si approva da sola (vedi «Le letture su Supabase non chiedono»).
 
 Il tasto «Always Allow» non scrive più regole permanenti: è diventato il tasto
 centrale della riga (vedi sotto).
@@ -29,8 +30,10 @@ sessione sul PC ──hook──▶ plugin (http://127.0.0.1, come prima)
 - **La richiesta resta sul deck per 5 minuti** (`DECK_ATTESA_S`, fino a 600
   secondi), anche se intanto apri la sessione su claude.ai per leggerla. Su
   claude.ai resta rispondibile per tutto il tempo: vale la prima risposta, e se
-  rispondi lì sparisce anche dal deck. Il deck non approva mai niente da solo, e un
-  guasto del relay non blocca mai Claude.
+  rispondi lì sparisce anche dal deck — se la rifiuti subito, se la approvi quando lo
+  strumento ha finito (Claude Code non avvisa l'hook: se ne accorge dal transcript
+  della sessione). Il deck non approva mai niente da solo, e un guasto del relay non
+  blocca mai Claude.
 - **Non si fanno dal deck:** le risposte scritte a mano («altro») e le domande con
   più di quattro opzioni (si rispondono su Claude, e il tasto Waiting le segnala), e
   le domande della chat normale di claude.ai o della app desktop, che non hanno un
@@ -191,6 +194,31 @@ centrale, oppure Allow / opzione a destra. Senza richieste tornano a mostrare i
 consumi. Appena cambiano faccia aspettano un secondo prima di accettare una
 pressione, così un tocco per aggiornare i consumi non diventa un'approvazione.
 
+## Le letture su Supabase non chiedono
+
+Dal 09/11/2026 una **lettura** su Supabase si approva da sola, senza passare dal deck
+né da claude.ai: nelle sessioni cloud la approva l'hook, in quelle del PC il plugin,
+con la stessa regola (`letturaAutomatica` in `cloud/deck-hook.mjs`). Chiedono ancora
+tutte le scritture, e tutto ciò che non è sicuramente una lettura.
+
+È una lettura:
+- `execute_sql` con **una sola istruzione** che comincia con `select`, `with`,
+  `explain` (senza `analyze`), `show`, `values` o `table`, senza parole che scrivono
+  (`insert`, `update`, `delete` anche dentro una CTE, `select … into`, `for update`…),
+  e che chiama **solo funzioni di Postgres che leggono** (`count`, `coalesce`,
+  `date_trunc`, `jsonb_build_object`…). Una funzione del database — `select
+  rpc_apri_scuola(…)`, `select app.qualcosa(…)` — chiede sempre, perché una SELECT
+  può scrivere attraverso una funzione;
+- gli strumenti di Supabase che leggono e basta: `list_tables`, `get_logs`,
+  `get_advisors`, `list_migrations`, `search_docs`…
+
+Commenti e stringhe si leggono come li legge Postgres, così un `'/*'` o un `--`
+dentro un testo non nascondono una seconda istruzione.
+
+Per spegnerlo: nelle sessioni cloud la variabile d'ambiente `DECK_LETTURE_SQL=0`;
+sul PC la casella «Approva da solo le letture su Supabase» nelle impostazioni del
+tasto Allow.
+
 ## Come si usa: la riga in basso
 
 I tre tasti di approvazione cambiano faccia secondo cosa c'è in attesa.
@@ -325,6 +353,9 @@ della pagina di Claude), e la riga diventa quella delle risposte finché la rich
   Worker sia fra quelli permessi. Senza rete o senza chiavi l'hook tace apposta.
 - **Le richieste del PC non arrivano:** manca l'hook locale in `settings.json`
   (punto 4), o Claude Code non è stato riavviato dopo averlo aggiunto.
+- **Una novità dell'hook cloud non si vede:** l'hook lo serve il relay, quindi va
+  ripubblicato (`npx wrangler@4 deploy` dalla cartella `relay`), e lo prendono le
+  sessioni cloud aperte dopo: quelle già aperte tengono il loro.
 
 ## Per chi sviluppa
 
