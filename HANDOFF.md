@@ -386,10 +386,20 @@ Guida utente: `DECK-REMOTO.md`, «La terza pagina». Per chi tocca il codice:
   `METRICHE_PI` del pannello: `test/thecore.test.js` confronta pannello e codice.
 - Una chiave rifiutata (401) **non tiene i numeri di prima**: una chiave revocata deve
   smettere di mostrare i dati. Un guasto di rete sì, con «offline · hh:mm».
-- Il peso del colore sulla terza pagina è stato deciso guardando l'anteprima: «da
-  fare» colora solo la riga sotto, «guasto» aggiunge una cornice sottile. Con la
-  cornice forte per ogni coda non vuota la pagina era ambra tutti i giorni. La cornice
-  forte resta di «una sessione aspetta te».
+- **La terza pagina ha un linguaggio suo, quello di Discord** (chiesto il 09/11/2026:
+  «stesso stile di Discord»), perché sta accanto ai tasti di Discord e non a quelli di
+  Claude: `postaKey` e `thecoreKey` in `src/keyart.js` usano la tavolozza `D` (il fondo
+  #313338 di Discord), icone piene da 24 (`ICONE`, con i «tagli» nel colore del fondo
+  invece di un secondo colore) su una tessera del colore del GRUPPO, e lo stato in un
+  pallino sull'angolo (giallo da fare, rosso guasto). La posta usa il badge rosso delle
+  menzioni, grigio per un numero vecchio, e niente badge a zero. Le regole di
+  `keyart.js` per le pagine di Claude (banda = la pressione lascia il deck, nessun
+  colore decorativo) valgono lì e non qui: non «correggere» una pagina con l'altra. Le
+  decisioni di disegno stanno in `facciaPosta` (src/posta.js) e `vistaTheCore`
+  (src/thecore.js), testate; i renderer disegnano e basta. Le icone del plugin di
+  Discord non sono state viste (le pagine Elgato non erano raggiungibili): il linguaggio
+  è quello dell'app Discord. Prima versione col disegno delle altre pagine: con la
+  cornice forte su ogni coda non vuota la pagina era ambra tutti i giorni.
 - Solo i tasti TheCore hanno lo slot della riga in basso (`TASTI_CON_SLOT`): la Posta
   no, perché premuta apre Gmail e un tocco per leggere la posta non deve diventare
   un'approvazione.

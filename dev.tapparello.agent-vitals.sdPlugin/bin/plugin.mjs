@@ -4416,6 +4416,18 @@ function vistaPosta({ settings, rec, haPassword }) {
   if (rec.n === 0) return out(valore, "tutto letto");
   return out(valore, modo === "tutta" ? "in arrivo" : "da leggere");
 }
+function facciaPosta(v) {
+  const conto2 = /^\d+\+?$/.test(v.valore);
+  const offline = String(v.sub).startsWith("offline");
+  const etichetta2 = String(v.titolo);
+  return {
+    etichetta: etichetta2.charAt(0).toUpperCase() + etichetta2.slice(1),
+    badge: conto2 && v.valore !== "0" ? { testo: v.valore, tono: offline ? "spento" : "nuovo" } : v.valore === "!" ? { testo: "!", tono: "attenzione" } : null,
+    riga: v.sub,
+    rigaTono: v.tono === "attenzione" ? "attenzione" : "normale",
+    spenta: !conto2 && v.valore !== "!"
+  };
+}
 function statoPosta({ settings, rec, haPassword }) {
   const email = normEmail(settings?.email);
   if (!email) return "Scrivi l'indirizzo della casella.";
@@ -4459,7 +4471,7 @@ var METRICHE = {
   fatturato: {
     gruppo: "Vendite",
     nome: "Fatturato della stagione",
-    titolo: "fatturato",
+    titolo: "Fatturato",
     glifo: "euro",
     pagina: "/economics/pl",
     vista: (d) => {
@@ -4471,16 +4483,16 @@ var METRICHE = {
   ordini_oggi: {
     gruppo: "Vendite",
     nome: "Ordini di oggi",
-    titolo: "ordini oggi",
-    glifo: "euro",
+    titolo: "Ordini",
+    glifo: "carrello",
     pagina: "/economics/dashboard-ordini",
     vista: (d) => ({ valore: numero(d.vendite.ordiniOggi), sub: `${euroBreve(d.vendite.fatturatoOggi)} \xB7 ieri ${numero(d.vendite.ordiniIeri)}` })
   },
   ufficializzate: {
     gruppo: "Vendite",
     nome: "Scuole ufficializzate",
-    titolo: "firmate",
-    glifo: "scuola",
+    titolo: "Firmate",
+    glifo: "sigillo",
     pagina: "/directory",
     vista: (d) => ({ valore: numero(d.vendite.ufficializzate), sub: `su ${numero(d.directory.raggiunte)} raggiunte` })
   },
@@ -4488,7 +4500,7 @@ var METRICHE = {
   raggiunte: {
     gruppo: "Directory",
     nome: "Scuole raggiunte",
-    titolo: "raggiunte",
+    titolo: "Raggiunte",
     glifo: "scuola",
     pagina: "/metriche",
     vista: (d) => {
@@ -4500,8 +4512,8 @@ var METRICHE = {
   da_assegnare: {
     gruppo: "Directory",
     nome: "Scuole senza sales",
-    titolo: "senza sales",
-    glifo: "scuola",
+    titolo: "Senza sales",
+    glifo: "utentePiu",
     pagina: "/directory",
     vista: (d) => {
       const c = d.directory.competitor;
@@ -4511,8 +4523,8 @@ var METRICHE = {
   richieste: {
     gruppo: "Directory",
     nome: "Richieste dal form da assegnare",
-    titolo: "richieste",
-    glifo: "posta",
+    titolo: "Richieste",
+    glifo: "vassoio",
     pagina: "/contatti-senza-scuola",
     vista: (d) => ({ valore: numero(d.directory.richieste), sub: "dal form", tono: d.directory.richieste > 0 ? "attenzione" : null })
   },
@@ -4520,7 +4532,7 @@ var METRICHE = {
   ris_da_scrutinare: {
     gruppo: "Hiring",
     nome: "Candidature da scrutinare",
-    titolo: "candidature",
+    titolo: "Candidature",
     glifo: "persone",
     pagina: "/ris/lavora",
     vista: (d) => ({
@@ -4532,16 +4544,16 @@ var METRICHE = {
   ris_documenti: {
     gruppo: "Hiring",
     nome: "Documenti da verificare",
-    titolo: "documenti",
-    glifo: "persone",
+    titolo: "Documenti",
+    glifo: "documento",
     pagina: "/ris/candidature",
     vista: (d) => ({ valore: numero(d.hiring.documentiDaVerificare), sub: "da verificare", tono: d.hiring.documentiDaVerificare > 0 ? "attenzione" : null })
   },
   eletti_senza_documento: {
     gruppo: "Hiring",
     nome: "Eletti senza documento",
-    titolo: "senza doc.",
-    glifo: "persone",
+    titolo: "Senza doc.",
+    glifo: "documentoManca",
     pagina: "/ris/candidature",
     vista: (d) => ({ valore: numero(d.hiring.elettiSenzaDocumento), sub: "da contattare", tono: d.hiring.elettiSenzaDocumento > 0 ? "attenzione" : null })
   },
@@ -4549,7 +4561,7 @@ var METRICHE = {
     gruppo: "Hiring",
     nome: "RIS eletti",
     titolo: "RIS",
-    glifo: "persone",
+    glifo: "stella",
     pagina: "/ris/metriche",
     vista: (d) => ({ valore: numero(d.hiring.risEletti), sub: "eletti col documento" })
   },
@@ -4557,8 +4569,8 @@ var METRICHE = {
   avvisi: {
     gruppo: "Operativo",
     nome: "Avvisi della Dashboard",
-    titolo: "avvisi",
-    glifo: "alert",
+    titolo: "Avvisi",
+    glifo: "campana",
     pagina: "/dashboard",
     vista: (d) => {
       const r = d.operativo.avvisiRossi, g = d.operativo.avvisiGialli;
@@ -4569,7 +4581,7 @@ var METRICHE = {
     // Nessuna pagina mostra l'outbox: premuto rilegge.
     gruppo: "Operativo",
     nome: "Job dell'outbox",
-    titolo: "outbox",
+    titolo: "Outbox",
     glifo: "battito",
     pagina: null,
     vista: (d) => {
@@ -4581,20 +4593,22 @@ var METRICHE = {
   plao: {
     gruppo: "Operativo",
     nome: "PLAO da controllare",
-    titolo: "PLAO firmate",
-    glifo: "euro",
+    titolo: "PLAO",
+    glifo: "penna",
     pagina: "/economics/paghe",
     vista: (d) => ({
+      // Il numero sono le firmate, che il coordinatore controlla prima dell'ultimo
+      // lunedì; quelle ancora da firmare aspettano un'altra persona.
       valore: numero(d.operativo.plaoFirmate),
-      sub: `${numero(d.operativo.plaoDaFirmare)} da firmare`,
+      sub: d.operativo.plaoFirmate > 0 ? "da controllare" : `${numero(d.operativo.plaoDaFirmare)} da firmare`,
       tono: d.operativo.plaoFirmate > 0 ? "attenzione" : null
     })
   },
   fornitori: {
     gruppo: "Operativo",
     nome: "Ordini fornitori con un problema",
-    titolo: "fornitori",
-    glifo: "alert",
+    titolo: "Fornitori",
+    glifo: "camion",
     pagina: "/ordini-fornitori",
     vista: (d) => ({ valore: numero(d.operativo.fornitoriProblema), sub: "con un problema", tono: d.operativo.fornitoriProblema > 0 ? "guasto" : null })
   }
@@ -4656,15 +4670,15 @@ var MESSAGGIO_ERRORE = { chiave: "chiave?", server: "TheCore in errore", rete: "
 function vistaTheCore({ settings, tc, conf }) {
   const id = metricaDi(settings);
   const m = METRICHE[id];
-  const base2 = { titolo: m.titolo, glifo: m.glifo, pagina: m.pagina, metrica: id };
-  if (!conf?.completa) return { ...base2, valore: "\u2014", sub: "imposta TheCore", tono: null };
+  const base2 = { titolo: m.titolo, glifo: m.glifo, gruppo: m.gruppo, pagina: m.pagina, metrica: id, attenuato: false };
+  if (!conf?.completa) return { ...base2, valore: "\u2014", sub: "imposta TheCore", tono: null, attenuato: true };
   if (tc?.err === "chiave") return { ...base2, valore: "!", sub: "chiave rifiutata", tono: "attenzione" };
   if (!tc?.dati) {
     if (tc?.err) return { ...base2, valore: "--", sub: MESSAGGIO_ERRORE[tc.err] ?? tc.err, tono: tc.err === "stagione" ? null : "attenzione" };
-    return { ...base2, valore: "\u2026", sub: "lettura\u2026", tono: null };
+    return { ...base2, valore: "\u2026", sub: "lettura\u2026", tono: null, attenuato: true };
   }
   const v = m.vista(tc.dati);
-  if (tc.err) return { ...base2, valore: v.valore, sub: `offline \xB7 ${ora2(tc.okAt ?? tc.at)}`, tono: null };
+  if (tc.err) return { ...base2, valore: v.valore, sub: `offline \xB7 ${ora2(tc.okAt ?? tc.at)}`, tono: null, attenuato: true };
   return { ...base2, valore: v.valore, sub: v.sub, tono: v.tono ?? null };
 }
 function statoTheCore({ tc, conf }) {
@@ -5330,12 +5344,12 @@ var STATUS_ICON = { "needs-approval": "alert", "input-needed": "question", worki
 function statusKey(name, st, count, detail = "", tag = "", phase = null, sottotitolo = "", inRisposta = false) {
   const look = STATUS_LOOK[st] ?? STATUS_LOOK.none;
   const shown = String(name || "CLAUDE").slice(0, 11);
-  const icona = STATUS_ICON[st] ? glyph(STATUS_ICON[st], 10, 8, 22, look.col, 2.4) : "";
+  const icona2 = STATUS_ICON[st] ? glyph(STATUS_ICON[st], 10, 8, 22, look.col, 2.4) : "";
   const angolo = count > 1 ? badge(count, look.col) : tag === "cloud" ? glyph("cloud", 110, 7, 24, C.info, 2.2) : corner(tag);
   const pill = inRisposta ? `<rect x="38" y="9" width="68" height="20" rx="10" fill="${look.col}"/>` + txt(72, 23.5, 11, 800, C.bg, "RISPONDI") : "";
   return svgWrap(`
     ${tintFrame(look.col, !!look.strong, phase)}
-    ${icona}
+    ${icona2}
     ${angolo}
     ${pill}
     ${sottotitolo ? conTitolo(shown, sottotitolo, look.col) : `
@@ -5372,32 +5386,125 @@ function actionKey(glyphName, title, label, sub) {
     ${line(72, 92, 128, 24, 700, C.text, label)}
     ${foot(sub)}`);
 }
-var TONI = { attenzione: C.warn, guasto: C.bad };
-var cornice = (tono) => tono === "guasto" ? tintFrame(C.bad, false) : "";
-var SPENTI = /* @__PURE__ */ new Set(["0", "\u2014", "\u2026", "--", "ok"]);
-function numeroTerzaPagina(valore) {
-  const v = String(valore);
-  return line(72, 94, 124, 50, 700, SPENTI.has(v) ? C.dim : C.text, v, "middle", "", 20);
+var D = {
+  bg: "#313338",
+  // Discord, il fondo della chat
+  testo: "#f2f3f5",
+  tenue: "#b5bac1",
+  spento: "#80848e",
+  rosso: "#ed4245",
+  // badge delle menzioni, «si è rotto»
+  giallo: "#f0b232",
+  // «c'è da fare»
+  tessera: { Vendite: "#23a55a", Directory: "#5865f2", Hiring: "#eb459e", Operativo: "#6d6f78" }
+};
+var TONO_D = { attenzione: D.giallo, guasto: D.rosso };
+var svgDiscord = (inner) => "data:image/svg+xml," + encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="18" fill="${D.bg}"/>${inner}</svg>`
+);
+var stellaD = (punte, rFuori, rDentro, cx, cy, ruota = -90) => {
+  const p = [];
+  for (let i = 0; i < punte * 2; i++) {
+    const r = i % 2 ? rDentro : rFuori;
+    const a = (ruota + i * 180 / punte) * Math.PI / 180;
+    p.push(`${(cx + r * Math.cos(a)).toFixed(2)} ${(cy + r * Math.sin(a)).toFixed(2)}`);
+  }
+  return "M" + p.join(" L") + " Z";
+};
+var cerchio = (cx, cy, r) => `M${cx} ${cy} m-${r} 0 a${r} ${r} 0 1 0 ${2 * r} 0 a${r} ${r} 0 1 0 -${2 * r} 0`;
+var foglio = "M6.3 2.8 H13.8 L18.8 7.8 V19.6 A1.6 1.6 0 0 1 17.2 21.2 H6.3 A1.6 1.6 0 0 1 4.7 19.6 V4.4 A1.6 1.6 0 0 1 6.3 2.8 Z";
+var ICONE = {
+  posta: [
+    ["p", "M4.8 5 H19.2 A2.3 2.3 0 0 1 21.5 7.3 V16.7 A2.3 2.3 0 0 1 19.2 19 H4.8 A2.3 2.3 0 0 1 2.5 16.7 V7.3 A2.3 2.3 0 0 1 4.8 5 Z"],
+    ["t", "M4.4 7.5 L12 12.8 L19.6 7.5"]
+  ],
+  euro: [["l", "M17.6 6.9 A6.4 6.4 0 1 0 17.6 17.1"], ["l", "M4.6 10.3 H13.2"], ["l", "M4.6 13.7 H12.4"]],
+  carrello: [["l", "M2.8 4.5 H5.4 L7.7 14.6 H18.1 L20.6 7.6 H6.3"], ["p", cerchio(9.2, 19, 1.8)], ["p", cerchio(16.8, 19, 1.8)]],
+  sigillo: [["p", stellaD(12, 9.6, 8.1, 12, 12)], ["t", "M8.2 12.2 L10.9 14.9 L15.9 9.6"]],
+  scuola: [
+    ["p", "M12 2.9 L21.3 8.4 H2.7 Z"],
+    ["l", "M5.6 10.6 V17.4"],
+    ["l", "M9.9 10.6 V17.4"],
+    ["l", "M14.1 10.6 V17.4"],
+    ["l", "M18.4 10.6 V17.4"],
+    ["l", "M3 20.2 H21"]
+  ],
+  utentePiu: [
+    ["p", cerchio(9.5, 7.9, 3.9)],
+    ["p", "M2.3 20.5 C2.3 16.3 5.5 13.6 9.5 13.6 C13.5 13.6 16.7 16.3 16.7 20.5 Z"],
+    ["l", "M19.6 7.2 V13.2"],
+    ["l", "M16.6 10.2 H22.6"]
+  ],
+  vassoio: [
+    ["l", "M3 13.4 L5.5 5.9 A1.6 1.6 0 0 1 7 4.8 H17 A1.6 1.6 0 0 1 18.5 5.9 L21 13.4 V17.9 A1.6 1.6 0 0 1 19.4 19.5 H4.6 A1.6 1.6 0 0 1 3 17.9 Z"],
+    ["l", "M3 13.4 H8 L9.6 16 H14.4 L16 13.4 H21"]
+  ],
+  persone: [
+    ["p", cerchio(16.7, 7.6, 3)],
+    ["p", "M15 13.2 C18.9 12.9 22 15.3 22 19.6 H17.6 C17.4 16.8 16.6 14.7 15 13.2 Z"],
+    ["b", cerchio(8.6, 8.1, 3.7)],
+    ["b", "M1.8 20.4 C1.8 16.4 4.8 13.8 8.6 13.8 C12.4 13.8 15.4 16.4 15.4 20.4 Z"]
+  ],
+  documento: [["p", foglio], ["t", "M13.8 2.8 V7.8 H18.8"], ["t", "M8.4 14 L10.7 16.3 L15.1 11.8"]],
+  documentoManca: [["p", foglio], ["t", "M13.8 2.8 V7.8 H18.8"], ["t", "M11.75 10 V14.2"], ["t", "M11.75 17.3 V17.4"]],
+  stella: [["p", stellaD(5, 9.8, 4.3, 12, 12.8)]],
+  campana: [
+    ["p", "M12 2.8 C8.5 2.8 6.2 5.4 6.2 9.1 V12.9 L4.4 16 V17.4 H19.6 V16 L17.8 12.9 V9.1 C17.8 5.4 15.5 2.8 12 2.8 Z"],
+    ["p", "M9.6 18.9 A2.4 2.4 0 0 0 14.4 18.9 Z"]
+  ],
+  battito: [["l", "M2.4 12.4 H6.6 L9 6.2 L13.6 18.6 L16.2 12.4 H21.6"]],
+  penna: [["p", "M16.1 3.6 L20.4 7.9 L9.8 18.5 L4.4 19.6 L5.5 14.2 Z"], ["t", "M14.2 5.5 L18.5 9.8"], ["l", "M12.6 21 H21"]],
+  camion: [
+    ["p", "M3.6 6.2 H14.6 V16.4 H2.4 V7.4 A1.2 1.2 0 0 1 3.6 6.2 Z"],
+    ["p", "M15.6 9.2 H18.7 L21.6 12.6 V16.4 H15.6 Z"],
+    ["b", cerchio(7, 17.4, 2.3)],
+    ["b", cerchio(17.6, 17.4, 2.3)]
+  ]
+};
+function icona(nome, x, y, size, colore, fondo) {
+  const s = size / 24;
+  const linea = 2.2;
+  const pezzi = (ICONE[nome] ?? ICONE.battito).map(([m, d]) => {
+    if (m === "p") return `<path d="${d}" fill="${colore}"/>`;
+    if (m === "b") return `<path d="${d}" fill="${colore}" stroke="${fondo}" stroke-width="1.7" paint-order="stroke"/>`;
+    const col = m === "t" ? fondo : colore;
+    return `<path d="${d}" fill="none" stroke="${col}" stroke-width="${m === "t" ? 1.9 : linea}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  }).join("");
+  return `<g transform="translate(${x},${y}) scale(${s.toFixed(4)})">${pezzi}</g>`;
 }
-function postaKey(etichetta2, valore, sub, tono = null) {
-  const id = C.ident.posta;
-  const tinta = TONI[tono] ?? null;
-  return svgWrap(`
-    ${cornice(tono)}
-    ${band.cap(id)}
-    ${actionHead("posta", etichetta2, id)}
-    ${numeroTerzaPagina(valore)}
-    ${foot(sub, tinta ?? C.dim)}`);
+var pallino = (cx, cy, col) => `<circle cx="${cx}" cy="${cy}" r="9" fill="${D.bg}"/><circle cx="${cx}" cy="${cy}" r="6" fill="${col}"/>`;
+var VUOTI = /* @__PURE__ */ new Set(["0", "\u2014", "\u2026", "--", "ok"]);
+function postaKey(f) {
+  const busta = f.spenta ? D.spento : D.testo;
+  let badge2 = "";
+  if (f.badge) {
+    const testo = String(f.badge.testo);
+    const [t, size] = fitClip(testo, 52, 20, 13);
+    const w = Math.max(30, Math.ceil(t.length * ADVANCE * size) + 16);
+    const cx = Math.min(144 - 6 - w / 2, 96);
+    const fondo = f.badge.tono === "attenzione" ? D.giallo : f.badge.tono === "spento" ? D.spento : D.rosso;
+    const scritta = f.badge.tono === "attenzione" ? "#1e1f22" : "#ffffff";
+    badge2 = `<rect x="${(cx - w / 2 - 4).toFixed(1)}" y="7" width="${w + 8}" height="38" rx="19" fill="${D.bg}"/><rect x="${(cx - w / 2).toFixed(1)}" y="11" width="${w}" height="30" rx="15" fill="${fondo}"/>` + txt(cx, 33, size, 800, scritta, t);
+  }
+  const rigaCol = f.rigaTono === "attenzione" ? D.giallo : D.tenue;
+  return svgDiscord(`
+    ${icona("posta", 40, 14, 64, busta, D.bg)}
+    ${badge2}
+    ${line(72, 100, 128, 20, 700, D.testo, f.etichetta)}
+    ${line(72, 126, 130, 15, 500, rigaCol, f.riga)}`);
 }
-function thecoreKey(glifo, titolo, valore, sub, tono = null, apre = true) {
-  const id = C.ident.thecore;
-  const tinta = TONI[tono] ?? null;
-  const testa = apre ? band.cap(id) + actionHead(glifo, titolo, id) : header(titolo);
-  return svgWrap(`
-    ${cornice(tono)}
-    ${testa}
-    ${numeroTerzaPagina(valore)}
-    ${foot(sub, tinta ?? C.dim)}`);
+function thecoreKey(v) {
+  const tessera = D.tessera[v.gruppo] ?? D.tessera.Operativo;
+  const tono = TONO_D[v.tono] ?? null;
+  const valore = String(v.valore);
+  const numCol = v.attenuato || VUOTI.has(valore) ? D.spento : D.testo;
+  return svgDiscord(`
+    <rect x="12" y="11" width="32" height="32" rx="10" fill="${tessera}"/>
+    ${icona(v.glifo, 16, 15, 24, "#ffffff", tessera)}
+    ${tono ? pallino(42, 13, tono) : ""}
+    ${line(52, 33, 86, 16, 700, D.testo, v.titolo, "start")}
+    ${line(72, 92, 126, 46, 800, numCol, valore, "middle", "", 20)}
+    ${line(72, 126, 130, 15, 500, tono ?? (v.attenuato ? D.spento : D.tenue), v.sub)}`);
 }
 var GLYPH_FOR = { PROJECT: "project", FOCUS: "focus", PROMPT: "prompt", CLAUDE: "custom" };
 function labelKey(title, label, sub, tint = null, strong = false) {
@@ -5472,7 +5579,7 @@ function aCapo(testo, max, righe) {
 }
 function grandeKey(o = {}) {
   const colIcona = o.colIcona ?? C.text;
-  const icona = o.casella != null ? o.casella ? `<circle cx="72" cy="34" r="21" fill="${colIcona}"/>${glyph("allow", 58, 20, 28, C.bg, 3.6)}` : `<circle cx="72" cy="34" r="19.5" fill="none" stroke="${colIcona}" stroke-width="3"/>${txt(72, 42.5, 24, 800, colIcona, String(o.numero ?? ""))}` : o.numero != null ? `<circle cx="72" cy="34" r="21" fill="${colIcona}"/>${txt(72, 43, 26, 800, C.bg, String(o.numero))}` : o.icona ? glyph(o.icona, 50, 12, 44, colIcona, 3.2) : "";
+  const icona2 = o.casella != null ? o.casella ? `<circle cx="72" cy="34" r="21" fill="${colIcona}"/>${glyph("allow", 58, 20, 28, C.bg, 3.6)}` : `<circle cx="72" cy="34" r="19.5" fill="none" stroke="${colIcona}" stroke-width="3"/>${txt(72, 42.5, 24, 800, colIcona, String(o.numero ?? ""))}` : o.numero != null ? `<circle cx="72" cy="34" r="21" fill="${colIcona}"/>${txt(72, 43, 26, 800, C.bg, String(o.numero))}` : o.icona ? glyph(o.icona, 50, 12, 44, colIcona, 3.2) : "";
   const righe = (o.testo ?? []).filter((t) => t != null && t !== "");
   let corpoSvg = "";
   const LARGO = 120;
@@ -5489,7 +5596,7 @@ function grandeKey(o = {}) {
     ${tintFrame(o.tinta ?? null, !!o.forte, o.phase ?? null)}
     ${o.cloud ? glyph("cloud", 9, 7, 24, C.info, 2.2) : ""}
     ${angolo}
-    ${icona}
+    ${icona2}
     ${corpoSvg}
     ${foot(o.piede ?? "", o.colPiede ?? C.dim)}`);
 }
@@ -5581,12 +5688,12 @@ function domandaKey(intestazione, testo, sub, cloud = false) {
   });
 }
 var INFO_TINTA = { prod: C.bad, staging: C.warn, legge: C.info };
-function infoKey(icona, righe, sub, tinta = null, opz = {}) {
+function infoKey(icona2, righe, sub, tinta = null, opz = {}) {
   const col = tinta ? INFO_TINTA[tinta] ?? null : null;
   if (opz.testo2) {
-    return grandeKey({ icona, colIcona: col ?? C.ident.focus, tinta: col, forte: tinta === "prod", cloud: opz.cloud, testo: righe.slice(0, 1), testo2: opz.testo2, col2: col ?? C.dim, piede: sub });
+    return grandeKey({ icona: icona2, colIcona: col ?? C.ident.focus, tinta: col, forte: tinta === "prod", cloud: opz.cloud, testo: righe.slice(0, 1), testo2: opz.testo2, col2: col ?? C.dim, piede: sub });
   }
-  return grandeKey({ icona, colIcona: col ?? opz.colIcona ?? C.ident.focus, tinta: col, cloud: opz.cloud, testo: righe, ideale: opz.ideale, piede: sub });
+  return grandeKey({ icona: icona2, colIcona: col ?? opz.colIcona ?? C.ident.focus, tinta: col, cloud: opz.cloud, testo: righe, ideale: opz.ideale, piede: sub });
 }
 function iconaStrumento(toolName) {
   const t = String(toolName ?? "");
@@ -5936,11 +6043,11 @@ function viewFor(kind, env) {
         rec: email ? state2.posta?.get(chiaveLettura(email, modoDi(settings))) : null,
         haPassword: !!passwordDi(state2.globalSettings, email)
       });
-      return img(postaKey(v.titolo, v.valore, v.sub, v.tono));
+      return img(postaKey(facciaPosta(v)));
     }
     case "thecore": {
       const v = vistaTheCore({ settings, tc: state2.thecore, conf: confTheCore(state2.globalSettings) });
-      return img(thecoreKey(v.glifo, v.titolo, v.valore, v.sub, v.tono, !!v.pagina));
+      return img(thecoreKey(v));
     }
     case "approve-allow":
     case "approve-always":
@@ -5983,9 +6090,9 @@ function rigaInBasso(kind, env) {
       const tinta = !c.scrive ? "legge" : c.progetto === "STAGING" ? "staging" : "prod";
       return { image: infoKey("database", [c.strumento], nome, tinta, { cloud, testo2: etichetta(c) }), painted };
     }
-    const [icona, colIcona] = iconaStrumento(req.toolName);
+    const [icona2, colIcona] = iconaStrumento(req.toolName);
     const bersaglioPieno = req.toolName === "Bash" ? String(req.toolInput?.command ?? "") : describeRequest({ ...req, cwd: "" }).target;
-    return { image: infoKey(icona, aCapo(bersaglioPieno, 15, 3), nome, null, { cloud, colIcona, ideale: 18 }), painted };
+    return { image: infoKey(icona2, aCapo(bersaglioPieno, 15, 3), nome, null, { cloud, colIcona, ideale: 18 }), painted };
   }
   const lungo = kind === "approve-allow" && !!c?.lungo;
   return {

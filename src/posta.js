@@ -95,6 +95,24 @@ export function vistaPosta({ settings, rec, haPassword }) {
   return out(valore, modo === "tutta" ? "in arrivo" : "da leggere");
 }
 
+// Da ciò che il tasto dice a come lo disegna (keyart: postaKey). Il conteggio va nel
+// badge delle menzioni di Discord: rosso se è di adesso, grigio se è l'ultimo letto
+// prima di un guasto; un problema da risolvere è un badge giallo «!». Zero non ha
+// badge, come in Discord. La busta è spenta finché non c'è un numero.
+export function facciaPosta(v) {
+  const conto = /^\d+\+?$/.test(v.valore);
+  const offline = String(v.sub).startsWith("offline");
+  const etichetta = String(v.titolo);
+  return {
+    etichetta: etichetta.charAt(0).toUpperCase() + etichetta.slice(1),
+    badge: conto && v.valore !== "0" ? { testo: v.valore, tono: offline ? "spento" : "nuovo" }
+      : v.valore === "!" ? { testo: "!", tono: "attenzione" } : null,
+    riga: v.sub,
+    rigaTono: v.tono === "attenzione" ? "attenzione" : "normale",
+    spenta: !conto && v.valore !== "!",
+  };
+}
+
 // La riga di stato del pannello delle impostazioni.
 export function statoPosta({ settings, rec, haPassword }) {
   const email = normEmail(settings?.email);

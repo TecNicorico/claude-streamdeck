@@ -71,15 +71,15 @@ const ROWS = [
     ["just denied", K.approveKey("approve-always", WEBFETCH, { denied: "just denied" })],
     ["hook error", K.approveKey("approve-deny", null, { err: "port in use" })],
   ]],
-  ["La terza pagina — posta e TheCore: ambra c'è da fare, rosso si è rotto", [
-    ["posta", K.postaKey("personale", "7", "da leggere")],
-    ["posta, letta", K.postaKey("lavoro", "0", "tutto letto")],
-    ["password?", K.postaKey("lavoro", "!", "password rifiutata", "attenzione")],
-    ["fatturato", K.thecoreKey("euro", "fatturato", "€ 184k", "▲ 14% vs 25/26")],
-    ["senza sales", K.thecoreKey("scuola", "senza sales", "14", "2 competitor", "attenzione")],
-    ["candidature", K.thecoreKey("persone", "candidature", "23", "da scrutinare · +6", "attenzione")],
-    ["outbox", K.thecoreKey("battito", "outbox", "3", "2 falliti · 1 fermo", "guasto", false)],
-    ["fornitori", K.thecoreKey("alert", "fornitori", "0", "con un problema")],
+  ["La terza pagina — nello stile di Discord: la tessera è il gruppo, il pallino lo stato", [
+    ["posta", K.postaKey({ etichetta: "Personale", badge: { testo: "7", tono: "nuovo" }, riga: "da leggere", rigaTono: "normale", spenta: false })],
+    ["posta, letta", K.postaKey({ etichetta: "Lavoro", badge: null, riga: "tutto letto", rigaTono: "normale", spenta: false })],
+    ["password?", K.postaKey({ etichetta: "Lavoro", badge: { testo: "!", tono: "attenzione" }, riga: "password rifiutata", rigaTono: "attenzione", spenta: false })],
+    ["fatturato", K.thecoreKey({ glifo: "euro", gruppo: "Vendite", titolo: "Fatturato", valore: "€ 184k", sub: "▲ 14% vs 25/26" })],
+    ["senza sales", K.thecoreKey({ glifo: "utentePiu", gruppo: "Directory", titolo: "Senza sales", valore: "14", sub: "2 competitor", tono: "attenzione" })],
+    ["candidature", K.thecoreKey({ glifo: "persone", gruppo: "Hiring", titolo: "Candidature", valore: "23", sub: "da scrutinare · +6", tono: "attenzione" })],
+    ["outbox", K.thecoreKey({ glifo: "battito", gruppo: "Operativo", titolo: "Outbox", valore: "3", sub: "2 falliti · 1 fermo", tono: "guasto" })],
+    ["fornitori", K.thecoreKey({ glifo: "camion", gruppo: "Operativo", titolo: "Fornitori", valore: "0", sub: "con un problema" })],
   ]],
 ];
 

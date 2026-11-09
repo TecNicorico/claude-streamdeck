@@ -233,11 +233,16 @@ Due tasti nuovi, pensati per una pagina tutta loro accanto ai due di Discord.
 - **TheCore**: un numero del gestionale, scelto dal menu del tasto. Premuto apre la
   pagina di TheCore da cui quel numero viene.
 
-Il colore dice lo stato, come nel resto del plugin: la riga sotto **ambra** vuol dire
-che c'è da fare qualcosa, la cornice **rossa** che qualcosa si è rotto. Un numero
-che non si è potuto aggiornare resta, con scritto «offline · 10:32»: non diventa mai
-uno zero. Si legge solo mentre la pagina è aperta: la posta ogni due minuti (e 45
-secondi dopo che l'hai aperta), TheCore ogni cinque.
+Sono disegnati nello stile di Discord, per stare accanto ai suoi tasti: fondo grigio
+di Discord, e per ogni metrica un'icona bianca su una tessera colorata. Il colore
+della **tessera** dice il gruppo (verde vendite, blu Directory, fucsia Hiring, grigio
+operativo); il **pallino** sull'angolo dice lo stato: **giallo** c'è da fare qualcosa,
+**rosso** qualcosa si è rotto, e la riga sotto prende lo stesso colore. La busta della
+posta porta il numero nel **badge rosso delle menzioni**, e senza mail da leggere il
+badge non c'è. Un numero che non si è potuto aggiornare resta, con scritto «offline ·
+10:32» (sulla busta il badge diventa grigio): non diventa mai uno zero. Si legge solo
+mentre la pagina è aperta: la posta ogni due minuti (e 45 secondi dopo che l'hai
+aperta), TheCore ogni cinque.
 
 ### Il tasto Posta
 
@@ -277,7 +282,7 @@ repository `thecore-v2`, da portare su staging e poi in produzione).
 | Gruppo | Metrica | Il tasto dice | Premuto apre |
 |---|---|---|---|
 | Vendite | Fatturato della stagione | lordo dello shop, al netto dei resi, e la variazione contro l'anno scorso alla stessa data | P&L effettivo |
-| Vendite | Ordini di oggi | ordini, incasso di oggi e ordini di ieri | Dashboard ordini |
+| Vendite | Ordini di oggi | ordini di oggi, incasso di oggi e ordini di ieri | Dashboard ordini |
 | Vendite | Scuole ufficializzate | firmate, su quante raggiunte | Directory |
 | Directory | Scuole raggiunte | in Directory, contro l'anno scorso alla stessa data | Metriche |
 | Directory | Scuole senza sales | da assegnare; ambra se ce n'è una segnalata per competitor | Directory |
@@ -288,7 +293,7 @@ repository `thecore-v2`, da portare su staging e poi in produzione).
 | Hiring | RIS eletti | col documento verificato | Metriche RIS |
 | Operativo | Avvisi della Dashboard | rossi e gialli, di tutte le regole | Dashboard |
 | Operativo | Job dell'outbox | falliti nell'ultima settimana e fermi; «ok» se niente | (rilegge) |
-| Operativo | PLAO firmate | da controllare prima dell'ultimo lunedì, e quante da firmare | Paghe |
+| Operativo | PLAO da controllare | le firmate, da controllare prima dell'ultimo lunedì (o, se non ce n'è, quante sono da firmare) | Paghe |
 | Operativo | Ordini fornitori con un problema | in rosso se ce n'è uno | Ordini fornitori |
 
 Se TheCore rifiuta la chiave (rigenerata, revocata, o il ruolo è cambiato) il tasto
@@ -298,8 +303,8 @@ scrive «chiave rifiutata» e smette di mostrare i numeri.
 
 ```
 | Posta personale | Posta lavoro   | Fatturato       | Discord        | Discord       |
-| Ordini oggi     | Raggiunte      | Senza sales     | Candidature    | Documenti     |
-| Firmate         | Avvisi         | PLAO firmate    | Outbox         | Fornitori     |
+| Ordini          | Raggiunte      | Senza sales     | Candidature    | Documenti     |
+| Firmate         | Avvisi         | PLAO            | Outbox         | Fornitori     |
 ```
 
 Sposta i due Discord dove stanno nelle altre pagine. **Mentre guardi questa pagina

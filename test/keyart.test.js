@@ -217,10 +217,14 @@ test("aCapo non perde la fine senza dirlo", () => {
 test("i tasti della terza pagina non escono dal riquadro, con i numeri più lunghi", async () => {
   const { postaKey, thecoreKey } = await import("../src/keyart.js");
   const { METRICHE, vistaTheCore } = await import("../src/thecore.js");
-  for (const valore of ["0", "7", "999+", "!", "—", "…", "--"]) {
-    for (const sub of ["da leggere", "offline · 23:59", "password rifiutata", "imposta l'indirizzo"]) {
-      for (const tono of [null, "attenzione"]) {
-        assertInsideBox(postaKey("enrico.malachin.lavoro", valore, sub, tono), `posta ${valore} ${sub}`);
+  const { vistaPosta, facciaPosta } = await import("../src/posta.js");
+  const recs = [null, { n: 0, at: 0 }, { n: 7, at: 0 }, { n: 1500, at: 0 }, { n: 3, at: 0, okAt: 0, err: "rete" },
+    { n: null, at: 0, err: "credenziali" }, { n: null, at: 0, err: "timeout" }];
+  for (const rec of recs) {
+    for (const settings of [{ email: "enrico.malachin.lavoro.lungo@scuolazoo.com" }, { email: "a@b.it", label: "Un'etichetta lunghissima" }, {}]) {
+      for (const haPassword of [true, false]) {
+        const f = facciaPosta(vistaPosta({ settings, rec, haPassword }));
+        assertInsideBox(postaKey(f), `posta ${JSON.stringify(rec)} ${settings.email ?? "-"}`);
       }
     }
   }
@@ -237,7 +241,7 @@ test("i tasti della terza pagina non escono dal riquadro, con i numeri più lung
   for (const metrica of Object.keys(METRICHE)) {
     for (const tc of [{ dati: grande, at: 0, err: null }, { dati: grande, at: 0, okAt: 0, err: "rete" }, { dati: null, at: 0, err: "chiave" }, null]) {
       const v = vistaTheCore({ settings: { metrica }, tc, conf });
-      assertInsideBox(thecoreKey(v.glifo, v.titolo, v.valore, v.sub, v.tono, !!v.pagina), `thecore ${metrica} ${tc?.err ?? "ok"}`);
+      assertInsideBox(thecoreKey(v), `thecore ${metrica} ${tc?.err ?? "ok"}`);
     }
   }
 });

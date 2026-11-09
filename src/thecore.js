@@ -54,7 +54,7 @@ const conto = (n, uno, molti) => `${numero(n)} ${n === 1 ? uno : molti}`;
 export const METRICHE = {
   // --------------------------------------------------------------- vendite
   fatturato: {
-    gruppo: "Vendite", nome: "Fatturato della stagione", titolo: "fatturato", glifo: "euro", pagina: "/economics/pl",
+    gruppo: "Vendite", nome: "Fatturato della stagione", titolo: "Fatturato", glifo: "euro", pagina: "/economics/pl",
     vista: (d) => {
       const v = d.vendite.fatturato, p = d.vendite.fatturatoAnnoScorso;
       const varia = variazione(v, p);
@@ -62,16 +62,16 @@ export const METRICHE = {
     },
   },
   ordini_oggi: {
-    gruppo: "Vendite", nome: "Ordini di oggi", titolo: "ordini oggi", glifo: "euro", pagina: "/economics/dashboard-ordini",
+    gruppo: "Vendite", nome: "Ordini di oggi", titolo: "Ordini", glifo: "carrello", pagina: "/economics/dashboard-ordini",
     vista: (d) => ({ valore: numero(d.vendite.ordiniOggi), sub: `${euroBreve(d.vendite.fatturatoOggi)} · ieri ${numero(d.vendite.ordiniIeri)}` }),
   },
   ufficializzate: {
-    gruppo: "Vendite", nome: "Scuole ufficializzate", titolo: "firmate", glifo: "scuola", pagina: "/directory",
+    gruppo: "Vendite", nome: "Scuole ufficializzate", titolo: "Firmate", glifo: "sigillo", pagina: "/directory",
     vista: (d) => ({ valore: numero(d.vendite.ufficializzate), sub: `su ${numero(d.directory.raggiunte)} raggiunte` }),
   },
   // ------------------------------------------------------------- directory
   raggiunte: {
-    gruppo: "Directory", nome: "Scuole raggiunte", titolo: "raggiunte", glifo: "scuola", pagina: "/metriche",
+    gruppo: "Directory", nome: "Scuole raggiunte", titolo: "Raggiunte", glifo: "scuola", pagina: "/metriche",
     vista: (d) => {
       const v = d.directory.raggiunte, p = d.directory.raggiunteAnnoScorso;
       const varia = variazione(v, p);
@@ -79,7 +79,7 @@ export const METRICHE = {
     },
   },
   da_assegnare: {
-    gruppo: "Directory", nome: "Scuole senza sales", titolo: "senza sales", glifo: "scuola", pagina: "/directory",
+    gruppo: "Directory", nome: "Scuole senza sales", titolo: "Senza sales", glifo: "utentePiu", pagina: "/directory",
     vista: (d) => {
       const c = d.directory.competitor;
       // Il competitor è l'urgenza (0124): una scuola segnalata va assegnata prima.
@@ -89,12 +89,12 @@ export const METRICHE = {
     },
   },
   richieste: {
-    gruppo: "Directory", nome: "Richieste dal form da assegnare", titolo: "richieste", glifo: "posta", pagina: "/contatti-senza-scuola",
+    gruppo: "Directory", nome: "Richieste dal form da assegnare", titolo: "Richieste", glifo: "vassoio", pagina: "/contatti-senza-scuola",
     vista: (d) => ({ valore: numero(d.directory.richieste), sub: "dal form", tono: d.directory.richieste > 0 ? "attenzione" : null }),
   },
   // ---------------------------------------------------------------- hiring
   ris_da_scrutinare: {
-    gruppo: "Hiring", nome: "Candidature da scrutinare", titolo: "candidature", glifo: "persone", pagina: "/ris/lavora",
+    gruppo: "Hiring", nome: "Candidature da scrutinare", titolo: "Candidature", glifo: "persone", pagina: "/ris/lavora",
     vista: (d) => ({
       valore: numero(d.hiring.daScrutinare),
       sub: d.hiring.arrivateOggi > 0 ? `da scrutinare · +${numero(d.hiring.arrivateOggi)}` : "da scrutinare",
@@ -102,20 +102,20 @@ export const METRICHE = {
     }),
   },
   ris_documenti: {
-    gruppo: "Hiring", nome: "Documenti da verificare", titolo: "documenti", glifo: "persone", pagina: "/ris/candidature",
+    gruppo: "Hiring", nome: "Documenti da verificare", titolo: "Documenti", glifo: "documento", pagina: "/ris/candidature",
     vista: (d) => ({ valore: numero(d.hiring.documentiDaVerificare), sub: "da verificare", tono: d.hiring.documentiDaVerificare > 0 ? "attenzione" : null }),
   },
   eletti_senza_documento: {
-    gruppo: "Hiring", nome: "Eletti senza documento", titolo: "senza doc.", glifo: "persone", pagina: "/ris/candidature",
+    gruppo: "Hiring", nome: "Eletti senza documento", titolo: "Senza doc.", glifo: "documentoManca", pagina: "/ris/candidature",
     vista: (d) => ({ valore: numero(d.hiring.elettiSenzaDocumento), sub: "da contattare", tono: d.hiring.elettiSenzaDocumento > 0 ? "attenzione" : null }),
   },
   ris_eletti: {
-    gruppo: "Hiring", nome: "RIS eletti", titolo: "RIS", glifo: "persone", pagina: "/ris/metriche",
+    gruppo: "Hiring", nome: "RIS eletti", titolo: "RIS", glifo: "stella", pagina: "/ris/metriche",
     vista: (d) => ({ valore: numero(d.hiring.risEletti), sub: "eletti col documento" }),
   },
   // ------------------------------------------------------------- operativo
   avvisi: {
-    gruppo: "Operativo", nome: "Avvisi della Dashboard", titolo: "avvisi", glifo: "alert", pagina: "/dashboard",
+    gruppo: "Operativo", nome: "Avvisi della Dashboard", titolo: "Avvisi", glifo: "campana", pagina: "/dashboard",
     vista: (d) => {
       const r = d.operativo.avvisiRossi, g = d.operativo.avvisiGialli;
       // Gli avvisi sono scuole e persone ferme: lavoro da fare, non un guasto.
@@ -124,7 +124,7 @@ export const METRICHE = {
   },
   job: {
     // Nessuna pagina mostra l'outbox: premuto rilegge.
-    gruppo: "Operativo", nome: "Job dell'outbox", titolo: "outbox", glifo: "battito", pagina: null,
+    gruppo: "Operativo", nome: "Job dell'outbox", titolo: "Outbox", glifo: "battito", pagina: null,
     vista: (d) => {
       const f = d.operativo.jobFalliti, r = d.operativo.jobInRitardo;
       if (f === 0 && r === 0) return { valore: "ok", sub: "nessun job fermo" };
@@ -132,15 +132,17 @@ export const METRICHE = {
     },
   },
   plao: {
-    gruppo: "Operativo", nome: "PLAO da controllare", titolo: "PLAO firmate", glifo: "euro", pagina: "/economics/paghe",
+    gruppo: "Operativo", nome: "PLAO da controllare", titolo: "PLAO", glifo: "penna", pagina: "/economics/paghe",
     vista: (d) => ({
+      // Il numero sono le firmate, che il coordinatore controlla prima dell'ultimo
+      // lunedì; quelle ancora da firmare aspettano un'altra persona.
       valore: numero(d.operativo.plaoFirmate),
-      sub: `${numero(d.operativo.plaoDaFirmare)} da firmare`,
+      sub: d.operativo.plaoFirmate > 0 ? "da controllare" : `${numero(d.operativo.plaoDaFirmare)} da firmare`,
       tono: d.operativo.plaoFirmate > 0 ? "attenzione" : null,
     }),
   },
   fornitori: {
-    gruppo: "Operativo", nome: "Ordini fornitori con un problema", titolo: "fornitori", glifo: "alert", pagina: "/ordini-fornitori",
+    gruppo: "Operativo", nome: "Ordini fornitori con un problema", titolo: "Fornitori", glifo: "camion", pagina: "/ordini-fornitori",
     vista: (d) => ({ valore: numero(d.operativo.fornitoriProblema), sub: "con un problema", tono: d.operativo.fornitoriProblema > 0 ? "guasto" : null }),
   },
 };
@@ -211,18 +213,18 @@ const MESSAGGIO_ERRORE = { chiave: "chiave?", server: "TheCore in errore", rete:
 export function vistaTheCore({ settings, tc, conf }) {
   const id = metricaDi(settings);
   const m = METRICHE[id];
-  const base = { titolo: m.titolo, glifo: m.glifo, pagina: m.pagina, metrica: id };
-  if (!conf?.completa) return { ...base, valore: "—", sub: "imposta TheCore", tono: null };
+  const base = { titolo: m.titolo, glifo: m.glifo, gruppo: m.gruppo, pagina: m.pagina, metrica: id, attenuato: false };
+  if (!conf?.completa) return { ...base, valore: "—", sub: "imposta TheCore", tono: null, attenuato: true };
   // Una chiave rifiutata: niente numeri vecchi, perché una chiave revocata deve
   // smettere di mostrare i dati, non mostrarli fermi.
   if (tc?.err === "chiave") return { ...base, valore: "!", sub: "chiave rifiutata", tono: "attenzione" };
   if (!tc?.dati) {
     if (tc?.err) return { ...base, valore: "--", sub: MESSAGGIO_ERRORE[tc.err] ?? tc.err, tono: tc.err === "stagione" ? null : "attenzione" };
-    return { ...base, valore: "…", sub: "lettura…", tono: null };
+    return { ...base, valore: "…", sub: "lettura…", tono: null, attenuato: true };
   }
   const v = m.vista(tc.dati);
   // Un numero vecchio resta, con l'ora: un guasto della rete non diventa uno zero.
-  if (tc.err) return { ...base, valore: v.valore, sub: `offline · ${ora(tc.okAt ?? tc.at)}`, tono: null };
+  if (tc.err) return { ...base, valore: v.valore, sub: `offline · ${ora(tc.okAt ?? tc.at)}`, tono: null, attenuato: true };
   return { ...base, valore: v.valore, sub: v.sub, tono: v.tono ?? null };
 }
 

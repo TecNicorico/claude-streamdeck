@@ -14,7 +14,7 @@ import {
   statusKey, fmtNum, aCapo, decisioneKey, opzioneKey, paginaKey, domandaKey, infoKey, iconaStrumento, selettoreKey,
   sceltaKey, confermaKey, vuotoKey, postaKey, thecoreKey,
 } from "./keyart.js";
-import { vistaPosta, passwordDi, chiaveLettura, normEmail, modoDi } from "./posta.js";
+import { vistaPosta, facciaPosta, passwordDi, chiaveLettura, normEmail, modoDi } from "./posta.js";
 import { vistaTheCore, confTheCore } from "./thecore.js";
 import { budgetPct, gaugeSource, familyOf } from "./usage.js";
 import {
@@ -353,11 +353,11 @@ export function viewFor(kind, env) {
         rec: email ? state.posta?.get(chiaveLettura(email, modoDi(settings))) : null,
         haPassword: !!passwordDi(state.globalSettings, email),
       });
-      return img(postaKey(v.titolo, v.valore, v.sub, v.tono));
+      return img(postaKey(facciaPosta(v)));
     }
     case "thecore": {
       const v = vistaTheCore({ settings, tc: state.thecore, conf: confTheCore(state.globalSettings) });
-      return img(thecoreKey(v.glifo, v.titolo, v.valore, v.sub, v.tono, !!v.pagina));
+      return img(thecoreKey(v));
     }
     case "approve-allow":
     case "approve-always":

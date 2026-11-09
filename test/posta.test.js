@@ -5,7 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  urlGmail, passwordDi, caselleDaLeggere, prossimaLettura, vistaPosta, statoPosta, normEmail, numeroBreve,
+  urlGmail, passwordDi, caselleDaLeggere, prossimaLettura, vistaPosta, facciaPosta, statoPosta, normEmail, numeroBreve,
   INTERVALLO_POSTA_MS, RITARDO_ERRORE_MS,
 } from "../src/posta.js";
 
@@ -65,4 +65,19 @@ test("la riga del pannello dice cosa fare", () => {
   assert.match(statoPosta({ settings: s, rec: { err: "credenziali", at: 0 }, haPassword: true }), /non riprova da solo/);
   assert.match(statoPosta({ settings: s, rec: { err: "rifiutato", at: 0 }, haPassword: true }), /amministratore/);
   assert.match(statoPosta({ settings: s, rec: { n: 3, at: 0 }, haPassword: true }), /^Collegato · 3 conversazioni/);
+});
+
+test("come si disegna: il conteggio nel badge di Discord, rosso se di adesso, grigio se vecchio", () => {
+  const s = { email: "enrico@scuolazoo.com", label: "lavoro" };
+  const f = (rec, haPassword = true) => facciaPosta(vistaPosta({ settings: s, rec, haPassword }));
+  assert.deepEqual(f({ n: 7, at: 0 }).badge, { testo: "7", tono: "nuovo" });
+  assert.equal(f({ n: 7, at: 0 }).etichetta, "Lavoro");
+  assert.equal(f({ n: 0, at: 0 }).badge, null, "zero non ha badge, come in Discord");
+  assert.equal(f({ n: 0, at: 0 }).spenta, false);
+  assert.deepEqual(f({ n: 3, at: 0, okAt: 0, err: "rete" }).badge, { testo: "3", tono: "spento" }, "un numero vecchio è grigio");
+  assert.deepEqual(f({ n: null, at: 0, err: "credenziali" }).badge, { testo: "!", tono: "attenzione" });
+  assert.equal(f({ n: null, at: 0, err: "credenziali" }).rigaTono, "attenzione");
+  assert.equal(f(null).spenta, true, "senza un numero la busta è spenta");
+  assert.equal(f(null, false).spenta, true);
+  assert.deepEqual(f({ n: 1500, at: 0 }).badge, { testo: "999+", tono: "nuovo" });
 });

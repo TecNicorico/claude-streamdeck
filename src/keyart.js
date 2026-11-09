@@ -374,52 +374,133 @@ function actionKey(glyphName, title, label, sub) {
     ${foot(sub)}`);
 }
 
-// ================= LA TERZA PAGINA — posta e TheCore =================
-// Un numero grande in bone, come i tasti dei consumi; il colore resta allo stato, in
-// due pesi diversi:
-//   attenzione  c'è da fare qualcosa (candidature da scrutinare, PLAO da controllare):
-//               solo la riga sotto in ambra. Su questa pagina è la normalità di ogni
-//               giorno, e cinque cornici accese insieme — provate sull'anteprima —
-//               facevano sembrare un allarme una mattina qualunque;
-//   guasto      qualcosa si è rotto (job falliti, un fornitore con un problema):
-//               anche la cornice, sottile e rossa. La cornice FORTE resta di «una
-//               sessione aspetta te», come in tutto il resto del plugin.
-// Un valore vuoto («0», «—», «…», «--», «ok») è spento: un tasto calmo deve sembrare calmo.
-const TONI = { attenzione: C.warn, guasto: C.bad };
-const cornice = (tono) => (tono === "guasto" ? tintFrame(C.bad, false) : "");
-const SPENTI = new Set(["0", "—", "…", "--", "ok"]);
-function numeroTerzaPagina(valore) {
-  const v = String(valore);
-  return line(72, 94, 124, 50, 700, SPENTI.has(v) ? C.dim : C.text, v, "middle", "", 20);
+// ================= LA TERZA PAGINA — posta e TheCore, nello stile di Discord =========
+// La terza pagina sta accanto ai tasti di Discord, e il 09/11/2026 è stata chiesta
+// «nello stesso stile»: fondo grigio di Discord, icone piene e bianche su una tessera
+// colorata (come le icone dei server), e il pallino rosso delle menzioni per ciò che
+// c'è da leggere. È un linguaggio diverso da quello delle pagine di Claude, apposta:
+// queste chiavi parlano col resto della loro pagina.
+//
+// Il colore resta comunque un significato:
+//   la TESSERA  dice il gruppo (vendite, Directory, Hiring, operativo): identità, fissa;
+//   il PALLINO  sulla tessera dice lo stato: giallo c'è da fare, rosso si è rotto;
+//   la BUSTA    porta il conteggio nel badge rosso di Discord; grigio se il numero è vecchio.
+const D = {
+  bg: "#313338", // Discord, il fondo della chat
+  testo: "#f2f3f5",
+  tenue: "#b5bac1",
+  spento: "#80848e",
+  rosso: "#ed4245", // badge delle menzioni, «si è rotto»
+  giallo: "#f0b232", // «c'è da fare»
+  tessera: { Vendite: "#23a55a", Directory: "#5865f2", Hiring: "#eb459e", Operativo: "#6d6f78" },
+};
+const TONO_D = { attenzione: D.giallo, guasto: D.rosso };
+
+const svgDiscord = (inner) =>
+  "data:image/svg+xml," + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="18" fill="${D.bg}"/>${inner}</svg>`);
+
+// Poligoni calcolati una volta: la rosetta del sigillo e la stella.
+const stellaD = (punte, rFuori, rDentro, cx, cy, ruota = -90) => {
+  const p = [];
+  for (let i = 0; i < punte * 2; i++) {
+    const r = i % 2 ? rDentro : rFuori;
+    const a = ((ruota + (i * 180) / punte) * Math.PI) / 180;
+    p.push(`${(cx + r * Math.cos(a)).toFixed(2)} ${(cy + r * Math.sin(a)).toFixed(2)}`);
+  }
+  return "M" + p.join(" L") + " Z";
+};
+const cerchio = (cx, cy, r) => `M${cx} ${cy} m-${r} 0 a${r} ${r} 0 1 0 ${2 * r} 0 a${r} ${r} 0 1 0 -${2 * r} 0`;
+const foglio = "M6.3 2.8 H13.8 L18.8 7.8 V19.6 A1.6 1.6 0 0 1 17.2 21.2 H6.3 A1.6 1.6 0 0 1 4.7 19.6 V4.4 A1.6 1.6 0 0 1 6.3 2.8 Z";
+
+// Le icone, in un riquadro da 24. Tre modi di disegnare un pezzo:
+//   p  pieno, nel colore dell'icona;
+//   l  linea, nel colore dell'icona;
+//   t  taglio: una linea nel colore del FONDO, che apre il pieno (la piega della busta,
+//      la spunta del sigillo). Così l'icona resta un solo colore e si legge da lontano.
+//   b  pieno col bordo del fondo: separa una figura da quella dietro (le due persone).
+const ICONE = {
+  posta: [["p", "M4.8 5 H19.2 A2.3 2.3 0 0 1 21.5 7.3 V16.7 A2.3 2.3 0 0 1 19.2 19 H4.8 A2.3 2.3 0 0 1 2.5 16.7 V7.3 A2.3 2.3 0 0 1 4.8 5 Z"],
+    ["t", "M4.4 7.5 L12 12.8 L19.6 7.5"]],
+  euro: [["l", "M17.6 6.9 A6.4 6.4 0 1 0 17.6 17.1"], ["l", "M4.6 10.3 H13.2"], ["l", "M4.6 13.7 H12.4"]],
+  carrello: [["l", "M2.8 4.5 H5.4 L7.7 14.6 H18.1 L20.6 7.6 H6.3"], ["p", cerchio(9.2, 19, 1.8)], ["p", cerchio(16.8, 19, 1.8)]],
+  sigillo: [["p", stellaD(12, 9.6, 8.1, 12, 12)], ["t", "M8.2 12.2 L10.9 14.9 L15.9 9.6"]],
+  scuola: [["p", "M12 2.9 L21.3 8.4 H2.7 Z"], ["l", "M5.6 10.6 V17.4"], ["l", "M9.9 10.6 V17.4"], ["l", "M14.1 10.6 V17.4"],
+    ["l", "M18.4 10.6 V17.4"], ["l", "M3 20.2 H21"]],
+  utentePiu: [["p", cerchio(9.5, 7.9, 3.9)], ["p", "M2.3 20.5 C2.3 16.3 5.5 13.6 9.5 13.6 C13.5 13.6 16.7 16.3 16.7 20.5 Z"],
+    ["l", "M19.6 7.2 V13.2"], ["l", "M16.6 10.2 H22.6"]],
+  vassoio: [["l", "M3 13.4 L5.5 5.9 A1.6 1.6 0 0 1 7 4.8 H17 A1.6 1.6 0 0 1 18.5 5.9 L21 13.4 V17.9 A1.6 1.6 0 0 1 19.4 19.5 H4.6 A1.6 1.6 0 0 1 3 17.9 Z"],
+    ["l", "M3 13.4 H8 L9.6 16 H14.4 L16 13.4 H21"]],
+  persone: [["p", cerchio(16.7, 7.6, 3)], ["p", "M15 13.2 C18.9 12.9 22 15.3 22 19.6 H17.6 C17.4 16.8 16.6 14.7 15 13.2 Z"],
+    ["b", cerchio(8.6, 8.1, 3.7)], ["b", "M1.8 20.4 C1.8 16.4 4.8 13.8 8.6 13.8 C12.4 13.8 15.4 16.4 15.4 20.4 Z"]],
+  documento: [["p", foglio], ["t", "M13.8 2.8 V7.8 H18.8"], ["t", "M8.4 14 L10.7 16.3 L15.1 11.8"]],
+  documentoManca: [["p", foglio], ["t", "M13.8 2.8 V7.8 H18.8"], ["t", "M11.75 10 V14.2"], ["t", "M11.75 17.3 V17.4"]],
+  stella: [["p", stellaD(5, 9.8, 4.3, 12, 12.8)]],
+  campana: [["p", "M12 2.8 C8.5 2.8 6.2 5.4 6.2 9.1 V12.9 L4.4 16 V17.4 H19.6 V16 L17.8 12.9 V9.1 C17.8 5.4 15.5 2.8 12 2.8 Z"],
+    ["p", "M9.6 18.9 A2.4 2.4 0 0 0 14.4 18.9 Z"]],
+  battito: [["l", "M2.4 12.4 H6.6 L9 6.2 L13.6 18.6 L16.2 12.4 H21.6"]],
+  penna: [["p", "M16.1 3.6 L20.4 7.9 L9.8 18.5 L4.4 19.6 L5.5 14.2 Z"], ["t", "M14.2 5.5 L18.5 9.8"], ["l", "M12.6 21 H21"]],
+  camion: [["p", "M3.6 6.2 H14.6 V16.4 H2.4 V7.4 A1.2 1.2 0 0 1 3.6 6.2 Z"], ["p", "M15.6 9.2 H18.7 L21.6 12.6 V16.4 H15.6 Z"],
+    ["b", cerchio(7, 17.4, 2.3)], ["b", cerchio(17.6, 17.4, 2.3)]],
+};
+
+function icona(nome, x, y, size, colore, fondo) {
+  const s = size / 24;
+  const linea = 2.2; // in unità del riquadro da 24: lo spessore scala con l'icona
+  const pezzi = (ICONE[nome] ?? ICONE.battito).map(([m, d]) => {
+    if (m === "p") return `<path d="${d}" fill="${colore}"/>`;
+    if (m === "b") return `<path d="${d}" fill="${colore}" stroke="${fondo}" stroke-width="1.7" paint-order="stroke"/>`;
+    const col = m === "t" ? fondo : colore;
+    return `<path d="${d}" fill="none" stroke="${col}" stroke-width="${m === "t" ? 1.9 : linea}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  }).join("");
+  return `<g transform="translate(${x},${y}) scale(${s.toFixed(4)})">${pezzi}</g>`;
 }
 
-// Una casella di posta: premuto apre Gmail, quindi banda e glifo (la pressione
-// lascia il deck).
-function postaKey(etichetta, valore, sub, tono = null) {
-  const id = C.ident.posta;
-  const tinta = TONI[tono] ?? null;
-  return svgWrap(`
-    ${cornice(tono)}
-    ${band.cap(id)}
-    ${actionHead("posta", etichetta, id)}
-    ${numeroTerzaPagina(valore)}
-    ${foot(sub, tinta ?? C.dim)}`);
+// Il pallino di stato, sull'angolo della tessera, con l'anello del fondo come i
+// pallini di presenza di Discord.
+const pallino = (cx, cy, col) =>
+  `<circle cx="${cx}" cy="${cy}" r="9" fill="${D.bg}"/><circle cx="${cx}" cy="${cy}" r="6" fill="${col}"/>`;
+
+const VUOTI = new Set(["0", "—", "…", "--", "ok"]);
+
+// Una casella di posta: la busta, e il conteggio nel badge delle menzioni.
+// `f` è facciaPosta(vistaPosta(...)) di src/posta.js.
+function postaKey(f) {
+  const busta = f.spenta ? D.spento : D.testo;
+  let badge = "";
+  if (f.badge) {
+    const testo = String(f.badge.testo);
+    const [t, size] = fitClip(testo, 52, 20, 13);
+    const w = Math.max(30, Math.ceil(t.length * ADVANCE * size) + 16);
+    const cx = Math.min(144 - 6 - w / 2, 96);
+    const fondo = f.badge.tono === "attenzione" ? D.giallo : f.badge.tono === "spento" ? D.spento : D.rosso;
+    const scritta = f.badge.tono === "attenzione" ? "#1e1f22" : "#ffffff";
+    badge = `<rect x="${(cx - w / 2 - 4).toFixed(1)}" y="7" width="${w + 8}" height="38" rx="19" fill="${D.bg}"/>` +
+      `<rect x="${(cx - w / 2).toFixed(1)}" y="11" width="${w}" height="30" rx="15" fill="${fondo}"/>` +
+      txt(cx, 33, size, 800, scritta, t);
+  }
+  const rigaCol = f.rigaTono === "attenzione" ? D.giallo : D.tenue;
+  return svgDiscord(`
+    ${icona("posta", 40, 14, 64, busta, D.bg)}
+    ${badge}
+    ${line(72, 100, 128, 20, 700, D.testo, f.etichetta)}
+    ${line(72, 126, 130, 15, 500, rigaCol, f.riga)}`);
 }
 
-// Una metrica di TheCore. Con una pagina da aprire è un tasto d'azione (banda e
-// glifo); senza (l'outbox) la pressione rilegge soltanto, quindi niente banda:
-// la regola 2 qui sopra.
-function thecoreKey(glifo, titolo, valore, sub, tono = null, apre = true) {
-  const id = C.ident.thecore;
-  const tinta = TONI[tono] ?? null;
-  const testa = apre
-    ? band.cap(id) + actionHead(glifo, titolo, id)
-    : header(titolo);
-  return svgWrap(`
-    ${cornice(tono)}
-    ${testa}
-    ${numeroTerzaPagina(valore)}
-    ${foot(sub, tinta ?? C.dim)}`);
+// Una metrica di TheCore: la tessera del gruppo con l'icona della metrica, il nome,
+// il numero grande e la riga sotto. `v` è vistaTheCore(...) di src/thecore.js.
+function thecoreKey(v) {
+  const tessera = D.tessera[v.gruppo] ?? D.tessera.Operativo;
+  const tono = TONO_D[v.tono] ?? null;
+  const valore = String(v.valore);
+  const numCol = v.attenuato || VUOTI.has(valore) ? D.spento : D.testo;
+  return svgDiscord(`
+    <rect x="12" y="11" width="32" height="32" rx="10" fill="${tessera}"/>
+    ${icona(v.glifo, 16, 15, 24, "#ffffff", tessera)}
+    ${tono ? pallino(42, 13, tono) : ""}
+    ${line(52, 33, 86, 16, 700, D.testo, v.titolo, "start")}
+    ${line(72, 92, 126, 46, 800, numCol, valore, "middle", "", 20)}
+    ${line(72, 126, 130, 15, 500, tono ?? (v.attenuato ? D.spento : D.tenue), v.sub)}`);
 }
 
 // Glyph is derived from the header so the call signature stays close to the original.
@@ -752,5 +833,5 @@ export {
   gaugeKey, linesKey, bigCountKey, burnKey, usageMeterKey, labelKey, actionKey,
   STATUS_LOOK, statusKey, APPROVE_LOOK, approveKey, fmtNum,
   aCapo, grandeKey, decisioneKey, opzioneKey, paginaKey, domandaKey, infoKey, iconaStrumento, SPENTO, selettoreKey,
-  sceltaKey, confermaKey, vuotoKey, postaKey, thecoreKey,
+  sceltaKey, confermaKey, vuotoKey, postaKey, thecoreKey, icona, D as DISCORD,
 };
