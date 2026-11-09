@@ -17,6 +17,7 @@ import {
 import { vistaPosta, facciaPosta, passwordDi, chiaveLettura, normEmail, modoDi } from "./posta.js";
 import { vistaTheCore, confTheCore } from "./thecore.js";
 import { budgetPct, gaugeSource, familyOf } from "./usage.js";
+import { cinqueOre } from "./consumi.js";
 import {
   resolveStatusKey, statusEntry, sessionWhere, fmtShort, shortWait, sessionState,
   blockedSessions, titoloSessione,
@@ -73,7 +74,7 @@ export const GAUGE_WINDOW = { "usage-session": "5h", "usage-weekly": "7day", "us
 export function gaugeMode(state, kind, now) {
   const win = GAUGE_WINDOW[kind];
   const hasLocal = !!(win && state.usageMeter?.[win]);
-  return gaugeSource({ usage: state.usage, usageErr: state.usageErr, usageAt: state.usageAt, now }, hasLocal);
+  return gaugeSource({ usage: state.usage, usageErr: state.usageErr, usageAt: state.usageAt, usageSrc: state.usageSrc ?? null, now }, hasLocal);
 }
 
 // A gauge key rendered from local transcript data. With a budget it becomes the
@@ -190,7 +191,7 @@ export function viewFor(kind, env) {
       const mode = gaugeMode(state, "usage-session", now);
       if (mode === "local") return img(localGauge("LAST 5H", state.usageMeter?.["5h"], settings.budget, usageViewMode, animPhase));
       if (mode !== "subscription") return img(gaugeKey("SESSION 5H", null, mode === "throttled" ? "throttled" : mode === "error" ? "sign in?" : "no data"));
-      const b = state.usage?.fiveHour;
+      const b = cinqueOre(state.usage, state.usageSrc, state.usageAt, now);
       return img(gaugeKey("SESSION 5H", b?.pct ?? null, sottoGauge(b, state.usageAt, now), b?.pct >= 90 ? animPhase : null));
     }
     case "usage-weekly": {

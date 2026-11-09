@@ -251,14 +251,19 @@ export function budgetPct(spend, budget) {
 //   "local"        no consumer token, or stale data and local numbers exist
 //   "error"        any other failure -> today's "sign in?", never silently local
 export const USAGE_FRESH_MS = 30 * 60_000;
+// Una lettura dal file di Claude Desktop vale fino a sei ore, perché Desktop lo
+// aggiorna quando vuole lui (a volte solo all'avvio): un numero di un'ora fa, con
+// scritto «1h 0m ago», dice più di «throttled». Il 5 ore lo taglia cinqueOre().
+export const DESKTOP_FRESH_MS = 6 * 3.6e6;
 export function hasSubscriptionData(usage) {
   if (!usage) return false;
   return !!(usage.fiveHour || usage.weekly || usage.weeklyOpus ||
     usage.scopedPct != null || (usage.models ?? []).length);
 }
-export function gaugeSource({ usage, usageErr, usageAt, now }, hasLocal = false) {
+export function gaugeSource({ usage, usageErr, usageAt, usageSrc = null, now }, hasLocal = false) {
   if (usage == null && !usageErr) return "pending";
-  const fresh = hasSubscriptionData(usage) && now - (usageAt ?? 0) < USAGE_FRESH_MS;
+  const validità = usageSrc === "desktop" ? DESKTOP_FRESH_MS : USAGE_FRESH_MS;
+  const fresh = hasSubscriptionData(usage) && now - (usageAt ?? 0) < validità;
   if (fresh) return "subscription";
   if (usageErr && String(usageErr).includes("429")) return "throttled";
   if (usageErr && String(usageErr).includes("no OAuth token")) return "local";

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  usageDaRisposta, percorsiDesktop, letturaDesktop, completa, serveEndpoint, ritardoDopo429,
+  usageDaRisposta, percorsiDesktop, letturaDesktop, formaDesktop, completa, cinqueOre, serveEndpoint, ritardoDopo429,
   API_BASE_MS, API_MAX_MS, FRESCA_MS,
 } from "../src/consumi.js";
 import { gaugeSource } from "../src/usage.js";
@@ -55,16 +55,47 @@ test("Desktop: una percentuale che manca resta assente, non zero", () => {
   assert.deepEqual(l.usage.models, []);
 });
 
-test("Desktop su Windows: %APPDATA% e la cartella del pacchetto del Microsoft Store", () => {
+test("Desktop su Windows: Claude-Data, %APPDATA% e la cartella del pacchetto MSIX", () => {
+  const cartelle = {
+    "C:\\Users\\malac\\AppData\\Local\\Claude-Data": ["claude_pzs8sxrjxfjjc"],
+    "C:\\Users\\malac\\AppData\\Local\\Packages": ["Claude_pzs8sxrjxfjjc", "Microsoft.WindowsTerminal_8wekyb3d8bbwe"],
+  };
   const p = percorsiDesktop({
-    platform: "win32", home: "C:\\Users\\enrico",
-    env: { APPDATA: "C:\\Users\\enrico\\AppData\\Roaming", LOCALAPPDATA: "C:\\Users\\enrico\\AppData\\Local" },
-    listDir: () => ["Claude_pzs8sxrjxfjjc", "Microsoft.WindowsTerminal_8wekyb3d8bbwe"],
+    platform: "win32", home: "C:\\Users\\malac",
+    env: { APPDATA: "C:\\Users\\malac\\AppData\\Roaming", LOCALAPPDATA: "C:\\Users\\malac\\AppData\\Local" },
+    listDir: (d) => cartelle[d] ?? [],
   });
   assert.deepEqual(p, [
-    "C:\\Users\\enrico\\AppData\\Roaming\\Claude\\plan-usage-history.json",
-    "C:\\Users\\enrico\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Roaming\\Claude\\plan-usage-history.json",
+    // Dove l'ha trovato il PowerShell sul PC di Enrico, il 09/11/2026.
+    "C:\\Users\\malac\\AppData\\Local\\Claude-Data\\claude_pzs8sxrjxfjjc\\plan-usage-history.json",
+    "C:\\Users\\malac\\AppData\\Roaming\\Claude\\plan-usage-history.json",
+    "C:\\Users\\malac\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Roaming\\Claude\\plan-usage-history.json",
   ]);
+});
+
+test("un file di Desktop illeggibile si descrive nel log coi soli nomi dei campi", () => {
+  assert.equal(formaDesktop("boh"), "not JSON");
+  assert.equal(formaDesktop(JSON.stringify({ v: 2, history: [] })), "top {v,history}");
+  assert.equal(formaDesktop(fileDesktop([{ ts: 1, org: "segreto", usage: { five: 3 } }])),
+    "1 samples, last {ts,org,usage}, u {undefined}");
+  assert.doesNotMatch(formaDesktop(fileDesktop([{ t: 1, org: "segreto", u: {} }])), /segreto/);
+});
+
+test("il 5 ore di Desktop vale cinque ore, la settimana sei", () => {
+  const usage = letturaDesktop(fileDesktop([{ t: NOW, u: { fh: 64, sd: 29 } }])).usage;
+  assert.equal(cinqueOre(usage, "desktop", NOW - 4 * 3.6e6, NOW).pct, 64);
+  assert.equal(cinqueOre(usage, "desktop", NOW - 5 * 3.6e6, NOW), null);
+  // Con l'ora di reset decide quella, non l'età.
+  const conReset = { ...usage, fiveHour: { pct: 64, resetsAt: iso(NOW + 60_000) } };
+  assert.equal(cinqueOre(conReset, "desktop", NOW - 5 * 3.6e6, NOW).pct, 64);
+  // Dall'endpoint la regola non cambia.
+  assert.equal(cinqueOre(usage, "api", NOW - 5 * 3.6e6, NOW).pct, 64);
+  // La settimana: un'ora fa è ancora un numero, sette ore fa no.
+  const err = "usage endpoint HTTP 429";
+  assert.equal(gaugeSource({ usage, usageErr: err, usageAt: NOW - 3.6e6, usageSrc: "desktop", now: NOW }), "subscription");
+  assert.equal(gaugeSource({ usage, usageErr: err, usageAt: NOW - 7 * 3.6e6, usageSrc: "desktop", now: NOW }), "throttled");
+  // Dall'endpoint resta la mezz'ora di sempre.
+  assert.equal(gaugeSource({ usage, usageErr: err, usageAt: NOW - 3.6e6, usageSrc: "api", now: NOW }), "throttled");
 });
 
 test("Desktop su macOS: Application Support", () => {
@@ -112,7 +143,7 @@ test("Fable da una lettura vecchia non si mostra come se fosse di adesso", () =>
 test("con Desktop fresco i tasti mostrano i numeri anche mentre l'endpoint risponde 429", () => {
   const usage = letturaDesktop(fileDesktop([{ t: NOW - 4 * 60_000, u: { fh: 64, sd: 29 } }])).usage;
   assert.equal(gaugeSource({ usage, usageErr: "usage endpoint HTTP 429 (backing off to 600s)", usageAt: NOW - 4 * 60_000, now: NOW }), "subscription");
-  // Un campione di ore fa invece no: torna il motivo per cui non c'è un numero.
+  // Senza dire da dove viene vale la mezz'ora dell'endpoint.
   assert.equal(gaugeSource({ usage, usageErr: "usage endpoint HTTP 429", usageAt: NOW - 3 * 3.6e6, now: NOW }), "throttled");
 });
 

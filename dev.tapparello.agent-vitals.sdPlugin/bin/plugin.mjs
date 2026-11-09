@@ -3918,6 +3918,8 @@ function percorsiDesktop({ platform: platform2, env = {}, home, listDir = () => 
     const sep = "\\";
     const roaming = env.APPDATA || `${home}${sep}AppData${sep}Roaming`;
     const local = env.LOCALAPPDATA || `${home}${sep}AppData${sep}Local`;
+    const dati = `${local}${sep}Claude-Data`;
+    for (const nome of listDir(dati)) out.push(`${dati}${sep}${nome}${sep}${FILE_DESKTOP}`);
     out.push(`${roaming}${sep}Claude${sep}${FILE_DESKTOP}`);
     const pacchetti = `${local}${sep}Packages`;
     for (const nome of listDir(pacchetti)) {
@@ -3961,6 +3963,25 @@ function letturaDesktop(raw) {
       models
     }
   };
+}
+function formaDesktop(raw) {
+  let j;
+  try {
+    j = JSON.parse(raw);
+  } catch {
+    return "not JSON";
+  }
+  const chiavi = (o) => o && typeof o === "object" && !Array.isArray(o) ? Object.keys(o).join(",") : typeof o;
+  const samples = Array.isArray(j?.samples) ? j.samples : Array.isArray(j) ? j : null;
+  if (!samples) return `top {${chiavi(j)}}`;
+  const ultimo = samples[samples.length - 1];
+  return `${samples.length} samples, last {${chiavi(ultimo)}}, u {${chiavi(ultimo?.u)}}`;
+}
+var CINQUE_ORE_MS = 5 * 36e5;
+function cinqueOre(usage, src, at, now) {
+  const b = usage?.fiveHour ?? null;
+  if (!b || src !== "desktop" || b.resetsAt) return b;
+  return now - (at ?? 0) >= CINQUE_ORE_MS ? null : b;
 }
 var FRESCA_MS = 30 * 6e4;
 var futuro = (iso, now) => !!iso && new Date(iso).getTime() > now;
@@ -4163,13 +4184,15 @@ function budgetPct(spend, budget) {
   return s / b * 100;
 }
 var USAGE_FRESH_MS = 30 * 6e4;
+var DESKTOP_FRESH_MS = 6 * 36e5;
 function hasSubscriptionData(usage) {
   if (!usage) return false;
   return !!(usage.fiveHour || usage.weekly || usage.weeklyOpus || usage.scopedPct != null || (usage.models ?? []).length);
 }
-function gaugeSource({ usage, usageErr, usageAt, now }, hasLocal = false) {
+function gaugeSource({ usage, usageErr, usageAt, usageSrc = null, now }, hasLocal = false) {
   if (usage == null && !usageErr) return "pending";
-  const fresh = hasSubscriptionData(usage) && now - (usageAt ?? 0) < USAGE_FRESH_MS;
+  const validit\u00E0 = usageSrc === "desktop" ? DESKTOP_FRESH_MS : USAGE_FRESH_MS;
+  const fresh = hasSubscriptionData(usage) && now - (usageAt ?? 0) < validit\u00E0;
   if (fresh) return "subscription";
   if (usageErr && String(usageErr).includes("429")) return "throttled";
   if (usageErr && String(usageErr).includes("no OAuth token")) return "local";
@@ -6072,7 +6095,7 @@ var GAUGE_WINDOW = { "usage-session": "5h", "usage-weekly": "7day", "usage-model
 function gaugeMode(state2, kind, now) {
   const win = GAUGE_WINDOW[kind];
   const hasLocal = !!(win && state2.usageMeter?.[win]);
-  return gaugeSource({ usage: state2.usage, usageErr: state2.usageErr, usageAt: state2.usageAt, now }, hasLocal);
+  return gaugeSource({ usage: state2.usage, usageErr: state2.usageErr, usageAt: state2.usageAt, usageSrc: state2.usageSrc ?? null, now }, hasLocal);
 }
 function localGauge(header, agg, budget, view = "cost", animPhase2 = null) {
   if (!agg) return usageMeterKey(header, "--", "no data yet", true);
@@ -6146,7 +6169,7 @@ function viewFor(kind, env) {
       const mode = gaugeMode(state2, "usage-session", now);
       if (mode === "local") return img(localGauge("LAST 5H", state2.usageMeter?.["5h"], settings.budget, usageViewMode, animPhase2));
       if (mode !== "subscription") return img(gaugeKey("SESSION 5H", null, mode === "throttled" ? "throttled" : mode === "error" ? "sign in?" : "no data"));
-      const b = state2.usage?.fiveHour;
+      const b = cinqueOre(state2.usage, state2.usageSrc, state2.usageAt, now);
       return img(gaugeKey("SESSION 5H", b?.pct ?? null, sottoGauge(b, state2.usageAt, now), b?.pct >= 90 ? animPhase2 : null));
     }
     case "usage-weekly": {
@@ -6460,6 +6483,7 @@ var state = {
 var USAGE_DELAY_BASE = API_BASE_MS;
 var usageDelay = USAGE_DELAY_BASE;
 var lastUsageAttempt = 0;
+var apiFermaFino = 0;
 var CACHE_FILE = path3.join(os.tmpdir(), "agent-vitals-usage-cache.json");
 try {
   const c = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
@@ -6511,7 +6535,9 @@ async function pollDesktopUsage() {
       const { mtimeMs } = await fsp.stat(fp);
       if (desktopSeen.get(fp) === mtimeMs) continue;
       desktopSeen.set(fp, mtimeMs);
-      const l = letturaDesktop(await fsp.readFile(fp, "utf8"));
+      const raw = await fsp.readFile(fp, "utf8");
+      const l = letturaDesktop(raw);
+      if (!l) log("usage: Claude Desktop history at", fp, "has no readable sample:", formaDesktop(raw));
       if (l && (!best || l.at > best.at)) {
         best = l;
         bestPath = fp;
@@ -6527,6 +6553,7 @@ async function pollDesktopUsage() {
   adottaConsumi(best.usage, best.at, "desktop");
 }
 async function pollUsage({ forza = false } = {}) {
+  if (Date.now() < apiFermaFino) return;
   if (!forza && !serveEndpoint({ now: Date.now(), usageAt: state.usageAt, src: state.usageSrc, apiOkAt: state.apiOkAt })) return;
   lastUsageAttempt = Date.now();
   try {
@@ -6541,10 +6568,12 @@ async function pollUsage({ forza = false } = {}) {
     });
     if (res.status === 429) {
       usageDelay = ritardoDopo429(usageDelay, res.headers.get("retry-after"));
+      apiFermaFino = Date.now() + usageDelay;
       throw new Error(`usage endpoint HTTP 429 (backing off to ${usageDelay / 1e3}s)`);
     }
     if (!res.ok) throw new Error(`usage endpoint HTTP ${res.status}`);
     usageDelay = USAGE_DELAY_BASE;
+    apiFermaFino = 0;
     const j = await res.json();
     if (!state.loggedRaw) {
       state.loggedRaw = true;

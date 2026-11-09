@@ -59,10 +59,13 @@ export function usageDaRisposta(j) {
 
 // ---------- il file di Claude Desktop ----------
 
-// Dove Claude Desktop tiene il file. Su Windows Desktop arriva anche dal Microsoft
-// Store, e un'app MSIX scrive l'AppData virtualizzato sotto il suo pacchetto
-// (`%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming`), non in `%APPDATA%`:
-// si guardano tutti e due, e vince il campione più recente.
+// Dove Claude Desktop tiene il file. Su Windows dipende da come è installato, e si
+// guardano tutti i posti noti; vince il campione più recente:
+// - `%LOCALAPPDATA%\Claude-Data\<pacchetto>\`: la build del Microsoft Store di oggi
+//   (`claude_pzs8sxrjxfjjc`, trovata sul PC di Enrico il 09/11/2026);
+// - `%APPDATA%\Claude\`: quella riportata nelle segnalazioni su GitHub;
+// - `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude\`: dove un'app
+//   MSIX scrive l'AppData virtualizzato.
 export const FILE_DESKTOP = "plan-usage-history.json";
 export function percorsiDesktop({ platform, env = {}, home, listDir = () => [] }) {
   const out = [];
@@ -74,6 +77,8 @@ export function percorsiDesktop({ platform, env = {}, home, listDir = () => [] }
     const sep = "\\";
     const roaming = env.APPDATA || `${home}${sep}AppData${sep}Roaming`;
     const local = env.LOCALAPPDATA || `${home}${sep}AppData${sep}Local`;
+    const dati = `${local}${sep}Claude-Data`;
+    for (const nome of listDir(dati)) out.push(`${dati}${sep}${nome}${sep}${FILE_DESKTOP}`);
     out.push(`${roaming}${sep}Claude${sep}${FILE_DESKTOP}`);
     const pacchetti = `${local}${sep}Packages`;
     for (const nome of listDir(pacchetti)) {
@@ -118,6 +123,29 @@ export function letturaDesktop(raw) {
       models,
     },
   };
+}
+
+// Il file c'è ma non se ne è tirato fuori niente: com'è fatto, per il log. Solo i
+// nomi dei campi, mai i valori (ci sono gli id dell'organizzazione).
+export function formaDesktop(raw) {
+  let j;
+  try { j = JSON.parse(raw); } catch { return "not JSON"; }
+  const chiavi = (o) => (o && typeof o === "object" && !Array.isArray(o) ? Object.keys(o).join(",") : typeof o);
+  const samples = Array.isArray(j?.samples) ? j.samples : Array.isArray(j) ? j : null;
+  if (!samples) return `top {${chiavi(j)}}`;
+  const ultimo = samples[samples.length - 1];
+  return `${samples.length} samples, last {${chiavi(ultimo)}}, u {${chiavi(ultimo?.u)}}`;
+}
+
+// Il 5 ore di Desktop vale solo nella sua finestra. Un campione più vecchio di cinque
+// ore viene per forza da una finestra già chiusa (dura cinque ore da quando si apre),
+// quindi la sua percentuale non dice niente di adesso: meglio nessun numero. Con l'ora
+// di reset (presa dall'endpoint) decide quella, come sempre.
+export const CINQUE_ORE_MS = 5 * 3.6e6;
+export function cinqueOre(usage, src, at, now) {
+  const b = usage?.fiveHour ?? null;
+  if (!b || src !== "desktop" || b.resetsAt) return b;
+  return now - (at ?? 0) >= CINQUE_ORE_MS ? null : b;
 }
 
 // ---------- mettere insieme le due ----------

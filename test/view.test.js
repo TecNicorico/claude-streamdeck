@@ -607,4 +607,12 @@ test("un numero senza ora di reset (dal file di Claude Desktop) dice da quanto �
   assert.match(drawn("usage-weekly", { state }), /4m ago/);
   assert.match(drawn("usage-model", { state }), /4m ago/);
   assert.match(drawn("usage-session", { state: { ...state, usageAt: NOW - 20_000 } }), /just now/);
+  // Un'ora fa: la settimana e il 5 ore ci sono ancora, con l'età (non «throttled»).
+  const unOra = { ...state, usageAt: NOW - 3.6e6, usageErr: "usage endpoint HTTP 429" };
+  assert.match(drawn("usage-weekly", { state: unOra }), /1h 0m ago/);
+  assert.match(drawn("usage-session", { state: unOra }), /64/);
+  // Sei ore fa il 5 ore è di una finestra chiusa: niente numero.
+  const seiOre = { ...state, usageAt: NOW - 5.5 * 3.6e6 };
+  assert.doesNotMatch(drawn("usage-session", { state: seiOre }), /64/);
+  assert.match(drawn("usage-weekly", { state: seiOre }), /29/);
 });

@@ -157,9 +157,10 @@ today/burn, it's a property of the log format.
 - Session/Weekly/Model gauges read **two sources of the same server numbers**
   (`src/consumi.js`, since 1.12.0): first Claude Desktop's own history file
   `plan-usage-history.json` (`{version, samples:[{t ms, org, u:{fh, sd, so, sn}}]}`,
-  percent; `%APPDATA%\Claude\` or, for the Microsoft Store build,
-  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`; macOS
-  `~/Library/Application Support/Claude/`), then `GET
+  percent; on Windows `%LOCALAPPDATA%\Claude-Data\<package>\` for today's Microsoft
+  Store build — found on-device 09/11/2026, `claude_pzs8sxrjxfjjc` —, plus
+  `%APPDATA%\Claude\` and `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`;
+  macOS `~/Library/Application Support/Claude/`), then `GET
   https://api.anthropic.com/api/oauth/usage` (undocumented, OAuth token from
   `~/.claude/.credentials.json`) only when the file is missing or older than ten
   minutes, plus once every half hour for reset times and Fable. Both are
@@ -174,6 +175,15 @@ today/burn, it's a property of the log format.
   than guessing, and has no reset times or Fable — `completa` carries those over
   from an earlier endpoint reading only while they are still valid (a reset in the
   future; Fable only from a reading under 30 min old).
+- **Desktop writes the file when it likes** (on-device: at 12:02, then not for an
+  hour), so a Desktop reading stays valid for six hours (`DESKTOP_FRESH_MS`;
+  `gaugeSource` takes `usageSrc`) and the key says how old it is (`1h 0m ago`). The
+  5h gauge drops a Desktop number older than five hours (`cinqueOre`): it can only
+  come from a window that has closed. After a 429 the endpoint is not called again
+  before the hold expires from ANY path (`apiFermaFino`): the startup poll and the
+  loop had separate clocks, and the loop called five minutes into a 30-minute hold.
+  A Desktop file that parses to nothing logs its field names (`formaDesktop`, never
+  the values), so a format change shows up in the log instead of a silent "throttled".
 - Today/Burn Rate are computed locally from `~/.claude/projects/**/*.jsonl`
   transcripts. This only sees Claude Code activity on **this machine** — it
   undercounts relative to the account-wide gauges above if the user also

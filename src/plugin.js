@@ -9,7 +9,7 @@ import path from "node:path";
 import { spawn, execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { escapeAppleScript, parseHotkey, hotkeyClause, classifyCustomCommand, parseKeychainToken, parsePsTree, hostAppForPid, focusStrategyForBundle, terminalFocusScript, parseProcStarts } from "./osa.js";
-import { usageDaRisposta, percorsiDesktop, letturaDesktop, completa, serveEndpoint, ritardoDopo429, API_BASE_MS } from "./consumi.js";
+import { usageDaRisposta, percorsiDesktop, letturaDesktop, formaDesktop, completa, serveEndpoint, ritardoDopo429, API_BASE_MS } from "./consumi.js";
 import { windowStartMs, parseRequests, mergeById, aggregate, aggregateByModel, budgetPct, localDay, newDayCounts, foldDayChunk, dayCountsTotals } from "./usage.js";
 import { resolveStatusKey, statusEntry, autoSlot, sessionState, blockedSessions, sessionSig, transcriptPathFor, pidLooksRecycled } from "./status.js";
 import { randomBytes, createHash } from "node:crypto";
@@ -128,6 +128,11 @@ const state = {
 const USAGE_DELAY_BASE = API_BASE_MS;
 let usageDelay = USAGE_DELAY_BASE;
 let lastUsageAttempt = 0;
+// Dopo un 429 l'endpoint non si richiama prima di quanto ha chiesto, da nessuna strada:
+// né dal giro, né dall'avvio, né da un tasto premuto, né dal reset di una finestra.
+// Prima il giro e l'avvio avevano due orologi, e il secondo richiamava cinque minuti
+// dopo un retry-after di mezz'ora (log del 09/11/2026).
+let apiFermaFino = 0;
 
 // Survive restarts without re-polling: reuse the last good reading for up to 30 min.
 // Outside the plugin folder on purpose: deploy.ps1 / deploy.sh replace that folder,
@@ -179,7 +184,9 @@ async function pollDesktopUsage() {
       const { mtimeMs } = await fsp.stat(fp);
       if (desktopSeen.get(fp) === mtimeMs) continue;
       desktopSeen.set(fp, mtimeMs);
-      const l = letturaDesktop(await fsp.readFile(fp, "utf8"));
+      const raw = await fsp.readFile(fp, "utf8");
+      const l = letturaDesktop(raw);
+      if (!l) log("usage: Claude Desktop history at", fp, "has no readable sample:", formaDesktop(raw));
       if (l && (!best || l.at > best.at)) { best = l; bestPath = fp; }
     } catch {}
   }
@@ -189,6 +196,7 @@ async function pollDesktopUsage() {
 }
 
 async function pollUsage({ forza = false } = {}) {
+  if (Date.now() < apiFermaFino) return;
   if (!forza && !serveEndpoint({ now: Date.now(), usageAt: state.usageAt, src: state.usageSrc, apiOkAt: state.apiOkAt })) return;
   lastUsageAttempt = Date.now();
   try {
@@ -203,10 +211,12 @@ async function pollUsage({ forza = false } = {}) {
     });
     if (res.status === 429) {
       usageDelay = ritardoDopo429(usageDelay, res.headers.get("retry-after"));
+      apiFermaFino = Date.now() + usageDelay;
       throw new Error(`usage endpoint HTTP 429 (backing off to ${usageDelay / 1000}s)`);
     }
     if (!res.ok) throw new Error(`usage endpoint HTTP ${res.status}`);
     usageDelay = USAGE_DELAY_BASE;
+    apiFermaFino = 0;
     const j = await res.json();
     if (!state.loggedRaw) {
       state.loggedRaw = true;
