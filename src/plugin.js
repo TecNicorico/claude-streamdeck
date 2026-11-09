@@ -13,8 +13,8 @@ import { windowStartMs, parseRequests, mergeById, aggregate, aggregateByModel, b
 import { resolveStatusKey, statusEntry, autoSlot, sessionState, blockedSessions, sessionSig, transcriptPathFor, pidLooksRecycled } from "./status.js";
 import { randomBytes } from "node:crypto";
 import {
-  decisionBody, answerBody, pressDecision, isQuestion,
-  enqueue, approvable, approvableDepth, pendingBySession, resolve, expiredIds, staleIds, seedBaselines, hookFragment,
+  decisionBody, answerBody, pressDecision, isQuestion, richiestaCorrente, sessioniInAttesa, prossimaScelta,
+  enqueue, approvableDepth, pendingBySession, resolve, expiredIds, staleIds, seedBaselines, hookFragment,
   rememberDeny, pruneDenies,
   PORT_DEFAULT, HOLD_S_DEFAULT, QUEUE_MAX,
 } from "./approve.js";
@@ -106,6 +106,9 @@ const state = {
   cloudSessions: [],
   // id richiesta -> a che punto è la risposta a una domanda (domande.js)
   risposte: new Map(),
+  // La sessione a cui la persona ha scelto di rispondere (tasto Focus o tasto Status);
+  // null = la richiesta più vecchia. Vedi richiestaCorrente in approve.js.
+  scelta: null,
   relay: { ok: false, err: null, at: 0, errori: 0, sessioni: 0 },
   lastHeadChangeAt: 0,
   globalSettings: {},
@@ -367,6 +370,9 @@ let approveSeq = 0;
 let hookServer = null;
 
 const renderApproveAll = () => renderAll(APPROVE_KINDS);
+// La richiesta a cui risponde adesso la riga in basso: quella della sessione scelta, o
+// la più vecchia. Ogni domanda «a cosa rispondo?» passa da qui.
+const corrente = () => richiestaCorrente(state.approveQueue, state.scelta);
 // Un tasto di consumi impostato per fare da Deny/Allow conta come tasto di approvazione:
 // senza nessuno dei due, le richieste resterebbero al terminale e a claude.ai.
 const faDaApprovazione = (v) => APPROVE_KINDS.includes(v?.kind) || !!slotDi(v?.kind, v?.settings);
@@ -385,8 +391,22 @@ const tipoAdesso = (context, kind) => {
 // hookErr clearing, a deny block expiring.)
 function queueChanged() {
   state.pending = pendingBySession(state.approveQueue);
+  // Una scelta che non ha più richieste a cui rispondere decade: si torna alla più vecchia.
+  if (state.scelta && !sessioniInAttesa(state.approveQueue).includes(state.scelta)) state.scelta = null;
   for (const id of [...state.risposte.keys()]) if (!state.approveQueue.some((r) => r.id === id)) state.risposte.delete(id);
-  renderAll([...APPROVE_KINDS, "approver-status", "approver-waiting"]);
+  renderAll([...APPROVE_KINDS, "approver-status", "approver-waiting", "focus-session"]);
+}
+
+// Sceglie a quale sessione risponde la riga in basso. Come un cambio di richiesta:
+// la finestra di assestamento riparte, così un tocco già partito non risponde alla
+// sessione appena scelta.
+function scegliSessione(sessionId) {
+  const prev = corrente()?.id ?? null;
+  state.scelta = sessionId;
+  noteHeadChange(prev);
+  state.lastHeadChangeAt = Date.now();
+  log(`approve: risposta alla sessione ${path.basename(corrente()?.cwd ?? "") || sessionId}`);
+  renderAll([...APPROVE_KINDS, "approver-status", "approver-waiting", "focus-session"]);
 }
 
 // "auth?" is for a REPEATED wrong-path signal, never a single stray 404 - any web page
@@ -405,7 +425,7 @@ function authFlagged() {
 // arriving or leaving cannot re-arm the settle window on a triad whose face never
 // changed — and so a genuine change to that face always does.
 function noteHeadChange(prevId) {
-  const now = approvable(state.approveQueue)?.id ?? null;
+  const now = corrente()?.id ?? null;
   if (now !== prevId) state.lastHeadChangeAt = Date.now();
 }
 
@@ -413,7 +433,7 @@ function noteHeadChange(prevId) {
 // prompt is live and answerable throughout) but the queue's honesty does.
 function answerAndDrop(ids, why) {
   if (!ids.length) return;
-  const prev = approvable(state.approveQueue)?.id ?? null;
+  const prev = corrente()?.id ?? null;
   for (const id of ids) {
     const { queue, req } = resolve(state.approveQueue, id);
     state.approveQueue = queue;
@@ -451,7 +471,7 @@ function onHookRequest(payload, ticket) {
     ticket,
   };
   ticket.id = req.id;
-  const prev = approvable(state.approveQueue)?.id ?? null;
+  const prev = corrente()?.id ?? null;
   const { queue, evicted } = enqueue(state.approveQueue, req);
   state.approveQueue = queue;
   if (evicted) { evicted.ticket.respond(null); log(`approve: evicted ${evicted.toolName} (queue full at ${QUEUE_MAX})`); }
@@ -461,7 +481,7 @@ function onHookRequest(payload, ticket) {
 
 const onHookDrop = (ticket) => {
   if (ticket.id == null) return;
-  const prev = approvable(state.approveQueue)?.id ?? null;
+  const prev = corrente()?.id ?? null;
   const { queue, req } = resolve(state.approveQueue, ticket.id);
   if (!req) return;
   state.approveQueue = queue;
@@ -1203,6 +1223,9 @@ function onKeyDown(context, kind) {
       return act(context, platform.openTerminal(s.path));
     }
     case "focus-session": {
+      // Con richieste a cui il deck sa rispondere, Focus sceglie la sessione a cui
+      // risponde la riga in basso (la prossima, in giro). Per aprirla, il suo tasto Status.
+      if (sessioniInAttesa(state.approveQueue).length) return scegliSessione(prossimaScelta(state.approveQueue, state.scelta));
       // Cycle within the blocked set when any session needs you, else all sessions.
       const blocked = blockedSessions(state.sessions, Date.now(), state.activity, state.pending);
       const pool = blocked.length ? blocked : state.sessions;
@@ -1260,6 +1283,11 @@ function onKeyDown(context, kind) {
         idx = cy.idx;
       }
       const entry = statusEntry(resolved, cycling ? idx : null);
+      // Una sessione che aspetta una risposta, e non è quella a cui sta rispondendo la
+      // riga in basso: la prima pressione la sceglie, la seconda la apre.
+      if (entry.sessionId && sessioniInAttesa(state.approveQueue).includes(entry.sessionId) && corrente()?.sessionId !== entry.sessionId) {
+        return scegliSessione(entry.sessionId);
+      }
       render(context, "approver-status");
       // Una sessione cloud non ha una finestra: si apre la sua pagina su claude.ai.
       return apriRecord(context, entry.url ? { url: entry.url } : sessionByPid(entry.pid));
@@ -1286,6 +1314,7 @@ function onKeyDown(context, kind) {
         const d = pressDecision({
           queue: state.approveQueue,
           shownId: shownReq.get(context) ?? null,
+          scelta: state.scelta,
           lastHeadChangeAt: state.lastHeadChangeAt,
           now: Date.now(),
           // Un tasto di consumi che è appena diventato Allow: un secondo intero prima di
@@ -1294,7 +1323,7 @@ function onKeyDown(context, kind) {
         });
         if (d.action === "none") return;
         if (d.action === "alert") { renderApproveAll(); return showAlert(context); }
-        const target = approvable(state.approveQueue);
+        const target = corrente();
         // Il server dell'hook locale non c'è: le richieste locali non possono arrivare,
         // ma quelle del cloud sì, e a quelle si risponde lo stesso.
         if (state.hookErr && !target?.cloud) return showAlert(context);
@@ -1316,7 +1345,7 @@ function onKeyDown(context, kind) {
 // Chiude una richiesta con una risposta e ridisegna. Unica strada per rispondere,
 // locale o cloud: il ticket sa dove mandare la risposta.
 function rispondi(id, body, perche) {
-  const prev = approvable(state.approveQueue)?.id ?? null;
+  const prev = corrente()?.id ?? null;
   const { queue, req } = resolve(state.approveQueue, id);
   if (!req) return false;
   state.approveQueue = queue;
@@ -1355,7 +1384,7 @@ function iniziaPressioneLunga(context, req) {
   annullaPressione(context);
   const timer = setTimeout(() => {
     pressioni.delete(context);
-    const ora = approvable(state.approveQueue);
+    const ora = corrente();
     if (!ora || ora.id !== req.id) return showAlert(context);
     rispondi(req.id, decisionBody("allow", req), "allow (pressione lunga)");
   }, LUNGO_MS);
@@ -1444,7 +1473,7 @@ function applicaRelay(snap) {
   let cambiata = false;
   const sparite = richiesteSparite(state.approveQueue, snap);
   if (sparite.length) {
-    const prev = approvable(state.approveQueue)?.id ?? null;
+    const prev = corrente()?.id ?? null;
     state.approveQueue = state.approveQueue.filter((r) => !sparite.includes(r.id));
     noteHeadChange(prev);
     cambiata = true;
@@ -1454,7 +1483,7 @@ function applicaRelay(snap) {
     for (const r of richiesteNuove(state.approveQueue, snap, new Set(gestiteCloud.keys()))) {
       const req = { id: ++approveSeq, ...voceDa(r, state.cloudSessions, adesso, snap.ora) };
       req.ticket = ticketCloud(req);
-      const prev = approvable(state.approveQueue)?.id ?? null;
+      const prev = corrente()?.id ?? null;
       const { queue, evicted } = enqueue(state.approveQueue, req);
       state.approveQueue = queue;
       if (evicted) evicted.ticket.respond(null);

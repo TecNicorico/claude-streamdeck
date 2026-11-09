@@ -542,3 +542,43 @@ test("con un titolo, il tasto Status mostra il titolo invece di «Working»", ()
   const senza = { ...emptyState(), sessions: [session({ status: "busy" })] };
   assert.match(drawn("approver-status", { state: senza, autoSlot: 0 }), /Working/, "senza titolo resta la parola dello stato");
 });
+
+// ---------- a quale sessione si risponde, e come si cambia (richiesta del 08/11/2026) ----------
+const dueSessioni = (scelta = null) => ({
+  ...emptyState(),
+  scelta,
+  sessions: [
+    session({ sessionId: "a", pid: 1, cwd: "/x/thecore-v2", status: "waiting", waitingFor: "permission prompt", titolo: "Mappa scuole" }),
+    session({ sessionId: "b", pid: 2, cwd: "/x/thecore-v2", status: "waiting", waitingFor: "permission prompt", titolo: "Compensi Master" }),
+  ],
+  approveQueue: [req({ id: 1, sessionId: "a", toolInput: { command: "npm test" } }), req({ id: 2, sessionId: "b", toolInput: { command: "npm run build" } })],
+});
+
+test("Focus dice a quale sessione risponde la riga in basso, e quante aspettano", () => {
+  const t = drawn("focus-session", { state: dueSessioni() });
+  assert.match(t, /RISPONDI A/);
+  assert.match(t, /Mappa scuole/);
+  assert.match(t, /1\/2/);
+  assert.match(drawn("focus-session", { state: dueSessioni("b") }), /Compensi Master/);
+});
+
+test("la riga in basso risponde alla sessione scelta, e lo dice in fondo col suo titolo", () => {
+  assert.match(drawn("approve-allow", { state: dueSessioni() }), /npm test/);
+  const scelta = dueSessioni("b");
+  assert.match(drawn("approve-allow", { state: scelta }), /npm run build/);
+  assert.match(drawn("approve-allow", { state: scelta }), /Compensi Master/);
+  assert.equal(viewFor("approve-allow", { state: scelta, now: NOW }).painted.reqId, 2);
+});
+
+test("il tasto Status della sessione a cui si risponde porta «RISPONDI», gli altri no", () => {
+  const st = dueSessioni("b");
+  const tastoA = drawn("approver-status", { state: st, settings: {}, autoSlot: 1 });
+  const tastoB = drawn("approver-status", { state: st, settings: {}, autoSlot: 0 });
+  const conRispondi = [tastoA, tastoB].filter((t) => />RISPONDI</.test(t));
+  assert.equal(conRispondi.length, 1);
+  assert.match(conRispondi[0], /Compensi Master/);
+});
+
+test("senza richieste Focus torna a essere Focus", () => {
+  assert.doesNotMatch(drawn("focus-session", { state: { ...emptyState(), sessions: [session()] } }), /RISPONDI A/);
+});

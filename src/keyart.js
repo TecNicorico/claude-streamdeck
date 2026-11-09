@@ -299,7 +299,7 @@ const STATUS_LOOK = {
 };
 // L'icona di ogni stato, in alto a sinistra: si riconosce da lontano prima di leggere.
 const STATUS_ICON = { "needs-approval": "alert", "input-needed": "question", working: "spark", finished: "allow", idle: "moon" };
-function statusKey(name, st, count, detail = "", tag = "", phase = null, sottotitolo = "") {
+function statusKey(name, st, count, detail = "", tag = "", phase = null, sottotitolo = "", inRisposta = false) {
   const look = STATUS_LOOK[st] ?? STATUS_LOOK.none;
   const shown = String(name || "CLAUDE").slice(0, 11);
   const icona = STATUS_ICON[st] ? glyph(STATUS_ICON[st], 10, 8, 22, look.col, 2.4) : "";
@@ -307,14 +307,32 @@ function statusKey(name, st, count, detail = "", tag = "", phase = null, sottoti
   // way to tell two sessions in the same project apart. Una sessione nel cloud ha la
   // nuvola al posto della parola.
   const angolo = count > 1 ? badge(count, look.col) : tag === "cloud" ? glyph("cloud", 110, 7, 24, C.info, 2.2) : corner(tag);
+  // La sessione a cui sta rispondendo la riga in basso: un'etichetta piena in alto.
+  const pill = inRisposta
+    ? `<rect x="38" y="9" width="68" height="20" rx="10" fill="${look.col}"/>` + txt(72, 23.5, 11, 800, C.bg, "RISPONDI")
+    : "";
   return svgWrap(`
     ${tintFrame(look.col, !!look.strong, phase)}
     ${icona}
     ${angolo}
+    ${pill}
     ${sottotitolo ? conTitolo(shown, sottotitolo, look.col) : `
     ${line(72, 78, 128, 25, 700, st === "none" ? C.dim : C.text, shown)}
     ${line(72, 104, 130, 17, 700, look.col, look.label)}`}
     ${detail ? line(72, 127, 132, 13, 400, C.dim, detail) : ""}`);
+}
+
+// Il tasto Focus quando ci sono richieste: a quale sessione sta rispondendo la riga in
+// basso. Premuto passa alla sessione dopo (vedi prossimaScelta in approve.js).
+function selettoreKey(nome, titolo, indice, totale, col = C.warn) {
+  const righe = titolo ? aCapo(titolo, 16, 2) : [];
+  return svgWrap(`
+    ${tintFrame(col, true)}
+    ${band.cap(C.ident.focus)}
+    ${actionHead("focus", "rispondi a", C.ident.focus)}
+    ${line(72, righe.length ? 66 : 86, 128, 22, 700, C.text, String(nome || "claude"))}
+    ${righe.map((t, i) => line(72, 88 + i * 17, 130, 14, 700, col, t)).join("")}
+    ${foot(totale > 1 ? `${indice}/${totale} · premi: cambia` : "l'unica in attesa")}`);
 }
 
 // Con un titolo, il titolo prende il posto della parola dello stato («Working»): lo
@@ -614,7 +632,8 @@ function paginaKey(testo, sub, avanti = true, cloud = false) {
 function domandaKey(intestazione, testo, sub, cloud = false) {
   return grandeKey({
     icona: "question", colIcona: C.ask, tinta: C.ask, cloud,
-    testo: aCapo(testo, 15, 3), ideale: 16, piede: String(intestazione || "domanda").toUpperCase() + (sub ? ` ${sub}` : ""),
+    // In fondo, di quale sessione è la domanda: l'intestazione la portano già le opzioni.
+    testo: aCapo(testo, 15, 3), ideale: 16, piede: sub || String(intestazione || "domanda").toUpperCase(),
   });
 }
 
@@ -645,5 +664,5 @@ export {
   C, pctColor, esc, tintFrame, svgWrap, fit, fits, txt, glyph, iconSvg, listIconSvg, ruleLines,
   gaugeKey, linesKey, bigCountKey, burnKey, usageMeterKey, labelKey, actionKey,
   STATUS_LOOK, statusKey, APPROVE_LOOK, approveKey, fmtNum,
-  aCapo, grandeKey, decisioneKey, opzioneKey, paginaKey, domandaKey, infoKey, iconaStrumento, SPENTO,
+  aCapo, grandeKey, decisioneKey, opzioneKey, paginaKey, domandaKey, infoKey, iconaStrumento, SPENTO, selettoreKey,
 };

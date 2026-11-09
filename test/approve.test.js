@@ -612,3 +612,29 @@ test("pendingBySession ignores requests with no session to attribute them to", (
   assert.equal(pendingBySession([q({ sessionId: null })]).size, 0);
   assert.equal(pendingBySession(undefined).size, 0);
 });
+
+// ---------- scegliere a quale sessione rispondere (richiesta del 08/11/2026) ----------
+import { richiestaCorrente, sessioniInAttesa, prossimaScelta, pressDecision as decidiPressione } from "../src/approve.js";
+const rq = (id, sessionId, over = {}) => ({ id, sessionId, toolName: "Bash", receivedAt: id, ...over });
+
+test("senza scelta si risponde alla più vecchia; con una scelta, a quella sessione", () => {
+  const q = [rq(1, "a"), rq(2, "b"), rq(3, "b")];
+  assert.equal(richiestaCorrente(q, null).id, 1);
+  assert.equal(richiestaCorrente(q, "b").id, 2, "la più vecchia della sessione scelta");
+  assert.equal(richiestaCorrente(q, "c").id, 1, "una scelta senza richieste non vale");
+});
+
+test("le sessioni in attesa, e il giro del selettore", () => {
+  const multipla = { toolName: "AskUserQuestion", toolInput: { questions: [{ question: "Q", multiSelect: true, options: [{ label: "x" }, { label: "y" }] }] } };
+  const q = [rq(1, "a"), rq(2, "b"), rq(3, "a"), rq(4, "c", multipla)];
+  assert.deepEqual(sessioniInAttesa(q), ["a", "b"], "una domanda a scelta multipla non si risponde dal deck");
+  assert.equal(prossimaScelta(q, null), "b");
+  assert.equal(prossimaScelta(q, "b"), "a");
+  assert.equal(prossimaScelta([], "a"), null);
+});
+
+test("una pressione risponde alla richiesta della sessione scelta, solo se è quella disegnata", () => {
+  const q = [rq(1, "a"), rq(2, "b")];
+  assert.deepEqual(decidiPressione({ queue: q, shownId: 2, lastHeadChangeAt: 0, now: 10_000, scelta: "b" }), { action: "resolve", id: 2, reason: "ok" });
+  assert.equal(decidiPressione({ queue: q, shownId: 1, lastHeadChangeAt: 0, now: 10_000, scelta: "b" }).action, "alert", "il tasto mostrava l'altra");
+});

@@ -11,14 +11,14 @@
 import path from "node:path";
 import {
   C, gaugeKey, linesKey, bigCountKey, burnKey, usageMeterKey, labelKey, actionKey,
-  statusKey, fmtNum, aCapo, decisioneKey, opzioneKey, paginaKey, domandaKey, infoKey, iconaStrumento,
+  statusKey, fmtNum, aCapo, decisioneKey, opzioneKey, paginaKey, domandaKey, infoKey, iconaStrumento, selettoreKey,
 } from "./keyart.js";
 import { budgetPct, gaugeSource, familyOf } from "./usage.js";
 import {
   resolveStatusKey, statusEntry, sessionWhere, fmtShort, shortWait, sessionState,
   blockedSessions, titoloSessione,
 } from "./status.js";
-import { approvable, approvableDepth, isQuestion, describeRequest } from "./approve.js";
+import { approvable, approvableDepth, isQuestion, describeRequest, richiestaCorrente, sessioniInAttesa } from "./approve.js";
 import { SLOT, facce, testoDomanda, statoIniziale } from "./domande.js";
 import { classifica, etichetta, bersaglio, confDa } from "./supabase.js";
 
@@ -213,6 +213,15 @@ export function viewFor(kind, env) {
       return img(labelKey("PROJECT", label || "configure", settings.path ? "" : "set folder in settings"));
     }
     case "focus-session": {
+      // Con richieste a cui il deck sa rispondere, Focus è il selettore: dice a quale
+      // sessione risponde la riga in basso, e premuto passa alla sessione dopo.
+      const inAttesa = sessioniInAttesa(state.approveQueue);
+      if (inAttesa.length) {
+        const r = richiestaCorrente(state.approveQueue, state.scelta);
+        const s = (state.sessions ?? []).find((x) => x.sessionId === r.sessionId);
+        const nome = path.basename(s?.cwd ?? r.cwd ?? "") || "claude";
+        return img(selettoreKey(nome, s ? titoloSessione(s) : "", inAttesa.indexOf(r.sessionId) + 1, inAttesa.length, isQuestion(r) ? C.ask : C.warn));
+      }
       // Blocked sessions take priority: pressing goes straight to the one that
       // needs you, and the key advertises that with the reason + a warm accent.
       const blocked = blockedSessions(state.sessions, now, state.activity, state.pending);
@@ -307,7 +316,9 @@ export function viewFor(kind, env) {
       }
       const blockedNow = entry.state === "needs-approval" || entry.state === "input-needed";
       const fresh = blockedNow && (!entry.waitingSince || now - entry.waitingSince < PULSE_MS);
-      return img(statusKey(name, entry.state, explicit ? resolved.count : 1, detail, entry.where, fresh ? animPhase : null, entry.titolo));
+      const corrente = richiestaCorrente(state.approveQueue, state.scelta);
+      const inRisposta = !!corrente && !!entry.sessionId && entry.sessionId === corrente.sessionId;
+      return img(statusKey(name, entry.state, explicit ? resolved.count : 1, detail, entry.where, fresh ? animPhase : null, entry.titolo, inRisposta));
     }
     case "approver-waiting": {
       // Dark and quiet until a session is actually blocked on you.
@@ -327,7 +338,8 @@ export function viewFor(kind, env) {
       const waited = since ? fmtShort(now - since) : "";
       const why = shortWait(b.waitingFor ?? p?.reason ?? "") || "needs you";
       const fresh = !since || now - since < PULSE_MS;
-      return img(statusKey(path.basename(b.cwd ?? "") || "claude", st, blocked.length, why + (waited ? " · " + waited : ""), sessionWhere(b), fresh ? animPhase : null, titoloSessione(b)));
+      const corrente = richiestaCorrente(state.approveQueue, state.scelta);
+      return img(statusKey(path.basename(b.cwd ?? "") || "claude", st, blocked.length, why + (waited ? " · " + waited : ""), sessionWhere(b), fresh ? animPhase : null, titoloSessione(b), !!corrente && corrente.sessionId === b.sessionId));
     }
     case "approve-allow":
     case "approve-always":
@@ -346,13 +358,17 @@ export function viewFor(kind, env) {
 // qualcosa che la persona non ha visto.
 export function rigaInBasso(kind, env) {
   const { state, settings = {}, now, animPhase = null, authFlagged = false } = env;
-  const req = approvable(state.approveQueue);
+  // La richiesta della sessione scelta col tasto Focus, o la più vecchia.
+  const req = richiestaCorrente(state.approveQueue, state.scelta);
   const fresh = req && now - req.receivedAt < PULSE_MS;
   const phase = fresh ? animPhase : null;
   // Un guasto dell'hook locale non riguarda le richieste del cloud.
   const err = req?.cloud ? null : state.hookErr ?? (!state.approveQueue.length && authFlagged ? "auth?" : null);
   const depth = approvableDepth(state.approveQueue);
-  const nome = req ? describeRequest(req).name : "";
+  // In fondo ai tasti, di quale sessione è la richiesta: il suo titolo, se ne ha uno,
+  // perché due sessioni sulla stessa repo hanno lo stesso nome di cartella.
+  const sess = req ? (state.sessions ?? []).find((x) => x.sessionId === req.sessionId) : null;
+  const nome = req ? (sess && titoloSessione(sess)) || describeRequest(req).name : "";
   const cloud = !!req?.cloud;
 
   if (!err && req && isQuestion(req)) {
@@ -365,7 +381,7 @@ export function rigaInBasso(kind, env) {
     if (!f) return { image: infoKey("question", ["—"], nome, null, { cloud }), painted };
     if (f.tipo === "opzione") return { image: opzioneKey(f.indice + 1, head, f.label, passo, phase, cloud), painted };
     if (f.tipo === "pagina") return { image: paginaKey("altre 2", f.verso ? "opzioni 3-4" : "opzioni 1-2", !!f.verso, cloud), painted };
-    return { image: domandaKey(head, testoDomanda(req, st), passo, cloud), painted };
+    return { image: domandaKey(head, testoDomanda(req, st), [passo, nome].filter(Boolean).join(" · "), cloud), painted };
   }
 
   const c = req ? classifica(req, confDa(state.globalSettings)) : null;
@@ -384,7 +400,7 @@ export function rigaInBasso(kind, env) {
 
   const lungo = kind === "approve-allow" && !!c?.lungo;
   return {
-    image: decisioneKey(kind, req, { err, depth, phase, lungo, target: c ? bersaglio(req, c) : "", label: settings.label }),
+    image: decisioneKey(kind, req, { err, depth, phase, lungo, target: c ? bersaglio(req, c) : "", label: settings.label || nome }),
     painted: { reqId: req?.id ?? null, rule: null, faccia: null, lungo },
   };
 }

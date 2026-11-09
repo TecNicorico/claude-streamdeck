@@ -150,6 +150,22 @@ vale come produzione.
 pannello copia il testo di «One-time setup» e incollalo dentro `"hooks"` nel file
 `%USERPROFILE%\.claude\settings.json`, poi riavvia le sessioni di Claude Code.
 
+## Scegliere a quale sessione rispondere
+
+Con più sessioni in attesa, la riga in basso risponde alla richiesta più vecchia, a
+meno che tu non ne scelga un'altra:
+
+- **Focus** diventa il selettore: «RISPONDI A», il nome e il titolo della sessione,
+  e «1/3». Ogni pressione passa alla sessione dopo. Senza richieste torna a portare
+  davanti le finestre delle sessioni, come prima.
+- Il **tasto Status** della sessione a cui stai rispondendo porta l'etichetta
+  **RISPONDI**. Premere il tasto Status di un'altra sessione in attesa la sceglie;
+  premerlo di nuovo la apre.
+- In fondo ai tasti della riga c'è il titolo della sessione, così due sessioni sulla
+  stessa repo non si confondono.
+
+Quando la sessione scelta non ha più richieste, la riga torna alla più vecchia.
+
 ## Il titolo della sessione sui tasti Status
 
 Sotto il nome della repo, al posto della parola dello stato («Working»), c'è il titolo

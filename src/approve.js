@@ -180,6 +180,33 @@ export const approvable = (queue) => (queue ?? []).find(answerable) ?? null;
 // requests no key can reach would just be wrong.
 export const approvableDepth = (queue) => (queue ?? []).filter(answerable).length;
 
+// La richiesta a cui risponde la riga in basso. Di solito la più vecchia; ma la persona
+// può scegliere una sessione (col tasto Focus, o premendo il suo tasto Status), e
+// finché quella sessione ha una richiesta a cui il deck sa rispondere, la riga risponde
+// a lei. Una scelta che non ha più richieste non vale: si torna alla più vecchia.
+export function richiestaCorrente(queue, scelta = null) {
+  if (scelta) {
+    const r = (queue ?? []).find((x) => answerable(x) && x.sessionId === scelta);
+    if (r) return r;
+  }
+  return approvable(queue);
+}
+
+// Le sessioni che aspettano una risposta che il deck sa dare, in ordine di attesa.
+export function sessioniInAttesa(queue) {
+  const out = [];
+  for (const r of queue ?? []) if (answerable(r) && r.sessionId && !out.includes(r.sessionId)) out.push(r.sessionId);
+  return out;
+}
+
+// La sessione dopo quella a cui si sta rispondendo, in giro.
+export function prossimaScelta(queue, scelta) {
+  const s = sessioniInAttesa(queue);
+  if (!s.length) return null;
+  const i = s.indexOf(richiestaCorrente(queue, scelta)?.sessionId);
+  return s[(i + 1) % s.length];
+}
+
 // Which sessions are blocked on the human, keyed by sessionId, derived purely from the
 // queue. This is the ONLY evidence claude-deck gets for a VS Code session: that
 // extension writes a session file with no status/waitingFor at all (verified 2.1.220),
@@ -304,10 +331,11 @@ export const SETTLE_MS = 500;
 // A press must answer the request the key was DISPLAYING, never merely whatever sits
 // at head when the keyDown arrives - those differ whenever a drop, eviction or new
 // request lands between paint and press.
-export function pressDecision({ queue, shownId, lastHeadChangeAt, now, settleMs = SETTLE_MS }) {
+export function pressDecision({ queue, shownId, lastHeadChangeAt, now, settleMs = SETTLE_MS, scelta = null }) {
   // `approvable`, not `head`: a question at the front of the queue is not answerable
-  // from a key, and must not make the request behind it unpressable either.
-  const h = approvable(queue);
+  // from a key, and must not make the request behind it unpressable either. E se la
+  // persona ha scelto una sessione, la richiesta di quella (richiestaCorrente).
+  const h = richiestaCorrente(queue, scelta);
   if (!h) return { action: "none", reason: "empty" };
   if (now - lastHeadChangeAt < settleMs) return { action: "none", reason: "settling" };
   if (h.id !== shownId) return { action: "alert", reason: "stale-paint" };

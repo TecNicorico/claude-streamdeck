@@ -4314,6 +4314,24 @@ var isQuestion = (req) => QUESTION_TOOLS.has(String(req?.toolName ?? ""));
 var answerable = (r) => !isQuestion(r) || domandaRispondibile(r);
 var approvable = (queue) => (queue ?? []).find(answerable) ?? null;
 var approvableDepth = (queue) => (queue ?? []).filter(answerable).length;
+function richiestaCorrente(queue, scelta = null) {
+  if (scelta) {
+    const r = (queue ?? []).find((x) => answerable(x) && x.sessionId === scelta);
+    if (r) return r;
+  }
+  return approvable(queue);
+}
+function sessioniInAttesa(queue) {
+  const out = [];
+  for (const r of queue ?? []) if (answerable(r) && r.sessionId && !out.includes(r.sessionId)) out.push(r.sessionId);
+  return out;
+}
+function prossimaScelta(queue, scelta) {
+  const s = sessioniInAttesa(queue);
+  if (!s.length) return null;
+  const i = s.indexOf(richiestaCorrente(queue, scelta)?.sessionId);
+  return s[(i + 1) % s.length];
+}
 var PEND_RANK = { "needs-approval": 0, "input-needed": 1 };
 function pendingBySession(queue) {
   const out = /* @__PURE__ */ new Map();
@@ -4389,8 +4407,8 @@ function staleIds(queue, sessions, activity, now) {
   return out;
 }
 var SETTLE_MS = 500;
-function pressDecision({ queue, shownId, lastHeadChangeAt, now, settleMs = SETTLE_MS }) {
-  const h = approvable(queue);
+function pressDecision({ queue, shownId, lastHeadChangeAt, now, settleMs = SETTLE_MS, scelta = null }) {
+  const h = richiestaCorrente(queue, scelta);
   if (!h) return { action: "none", reason: "empty" };
   if (now - lastHeadChangeAt < settleMs) return { action: "none", reason: "settling" };
   if (h.id !== shownId) return { action: "alert", reason: "stale-paint" };
@@ -4778,19 +4796,31 @@ var STATUS_LOOK = {
   unknown: { label: "no status", col: C.dim }
 };
 var STATUS_ICON = { "needs-approval": "alert", "input-needed": "question", working: "spark", finished: "allow", idle: "moon" };
-function statusKey(name, st, count, detail = "", tag = "", phase = null, sottotitolo = "") {
+function statusKey(name, st, count, detail = "", tag = "", phase = null, sottotitolo = "", inRisposta = false) {
   const look = STATUS_LOOK[st] ?? STATUS_LOOK.none;
   const shown = String(name || "CLAUDE").slice(0, 11);
   const icona = STATUS_ICON[st] ? glyph(STATUS_ICON[st], 10, 8, 22, look.col, 2.4) : "";
   const angolo = count > 1 ? badge(count, look.col) : tag === "cloud" ? glyph("cloud", 110, 7, 24, C.info, 2.2) : corner(tag);
+  const pill = inRisposta ? `<rect x="38" y="9" width="68" height="20" rx="10" fill="${look.col}"/>` + txt(72, 23.5, 11, 800, C.bg, "RISPONDI") : "";
   return svgWrap(`
     ${tintFrame(look.col, !!look.strong, phase)}
     ${icona}
     ${angolo}
+    ${pill}
     ${sottotitolo ? conTitolo(shown, sottotitolo, look.col) : `
     ${line(72, 78, 128, 25, 700, st === "none" ? C.dim : C.text, shown)}
     ${line(72, 104, 130, 17, 700, look.col, look.label)}`}
     ${detail ? line(72, 127, 132, 13, 400, C.dim, detail) : ""}`);
+}
+function selettoreKey(nome, titolo, indice, totale, col = C.warn) {
+  const righe = titolo ? aCapo(titolo, 16, 2) : [];
+  return svgWrap(`
+    ${tintFrame(col, true)}
+    ${band.cap(C.ident.focus)}
+    ${actionHead("focus", "rispondi a", C.ident.focus)}
+    ${line(72, righe.length ? 66 : 86, 128, 22, 700, C.text, String(nome || "claude"))}
+    ${righe.map((t, i) => line(72, 88 + i * 17, 130, 14, 700, col, t)).join("")}
+    ${foot(totale > 1 ? `${indice}/${totale} \xB7 premi: cambia` : "l'unica in attesa")}`);
 }
 function conTitolo(nome, titolo, col) {
   const righe = aCapo(titolo, 16, 2);
@@ -4956,9 +4986,10 @@ function domandaKey(intestazione, testo, sub, cloud = false) {
     colIcona: C.ask,
     tinta: C.ask,
     cloud,
+    // In fondo, di quale sessione è la domanda: l'intestazione la portano già le opzioni.
     testo: aCapo(testo, 15, 3),
     ideale: 16,
-    piede: String(intestazione || "domanda").toUpperCase() + (sub ? ` ${sub}` : "")
+    piede: sub || String(intestazione || "domanda").toUpperCase()
   });
 }
 var INFO_TINTA = { prod: C.bad, staging: C.warn, legge: C.info };
@@ -5199,6 +5230,13 @@ function viewFor(kind, env) {
       return img(labelKey("PROJECT", label || "configure", settings.path ? "" : "set folder in settings"));
     }
     case "focus-session": {
+      const inAttesa = sessioniInAttesa(state2.approveQueue);
+      if (inAttesa.length) {
+        const r = richiestaCorrente(state2.approveQueue, state2.scelta);
+        const s2 = (state2.sessions ?? []).find((x) => x.sessionId === r.sessionId);
+        const nome = path2.basename(s2?.cwd ?? r.cwd ?? "") || "claude";
+        return img(selettoreKey(nome, s2 ? titoloSessione(s2) : "", inAttesa.indexOf(r.sessionId) + 1, inAttesa.length, isQuestion(r) ? C.ask : C.warn));
+      }
       const blocked = blockedSessions(state2.sessions, now, state2.activity, state2.pending);
       const pool = blocked.length ? blocked : state2.sessions;
       const poolSig = pool.map((x) => x.pid ?? x.sessionId).join(",");
@@ -5282,7 +5320,9 @@ function viewFor(kind, env) {
       }
       const blockedNow = entry.state === "needs-approval" || entry.state === "input-needed";
       const fresh = blockedNow && (!entry.waitingSince || now - entry.waitingSince < PULSE_MS);
-      return img(statusKey(name, entry.state, explicit ? resolved.count : 1, detail, entry.where, fresh ? animPhase2 : null, entry.titolo));
+      const corrente2 = richiestaCorrente(state2.approveQueue, state2.scelta);
+      const inRisposta = !!corrente2 && !!entry.sessionId && entry.sessionId === corrente2.sessionId;
+      return img(statusKey(name, entry.state, explicit ? resolved.count : 1, detail, entry.where, fresh ? animPhase2 : null, entry.titolo, inRisposta));
     }
     case "approver-waiting": {
       const blocked = blockedSessions(state2.sessions, now, state2.activity, state2.pending);
@@ -5298,7 +5338,8 @@ function viewFor(kind, env) {
       const waited = since ? fmtShort(now - since) : "";
       const why = shortWait(b.waitingFor ?? p?.reason ?? "") || "needs you";
       const fresh = !since || now - since < PULSE_MS;
-      return img(statusKey(path2.basename(b.cwd ?? "") || "claude", st, blocked.length, why + (waited ? " \xB7 " + waited : ""), sessionWhere(b), fresh ? animPhase2 : null, titoloSessione(b)));
+      const corrente2 = richiestaCorrente(state2.approveQueue, state2.scelta);
+      return img(statusKey(path2.basename(b.cwd ?? "") || "claude", st, blocked.length, why + (waited ? " \xB7 " + waited : ""), sessionWhere(b), fresh ? animPhase2 : null, titoloSessione(b), !!corrente2 && corrente2.sessionId === b.sessionId));
     }
     case "approve-allow":
     case "approve-always":
@@ -5309,12 +5350,13 @@ function viewFor(kind, env) {
 }
 function rigaInBasso(kind, env) {
   const { state: state2, settings = {}, now, animPhase: animPhase2 = null, authFlagged: authFlagged2 = false } = env;
-  const req = approvable(state2.approveQueue);
+  const req = richiestaCorrente(state2.approveQueue, state2.scelta);
   const fresh = req && now - req.receivedAt < PULSE_MS;
   const phase = fresh ? animPhase2 : null;
   const err = req?.cloud ? null : state2.hookErr ?? (!state2.approveQueue.length && authFlagged2 ? "auth?" : null);
   const depth = approvableDepth(state2.approveQueue);
-  const nome = req ? describeRequest(req).name : "";
+  const sess = req ? (state2.sessions ?? []).find((x) => x.sessionId === req.sessionId) : null;
+  const nome = req ? sess && titoloSessione(sess) || describeRequest(req).name : "";
   const cloud = !!req?.cloud;
   if (!err && req && isQuestion(req)) {
     const st = state2.risposte?.get(req.id) ?? statoIniziale();
@@ -5326,7 +5368,7 @@ function rigaInBasso(kind, env) {
     if (!f) return { image: infoKey("question", ["\u2014"], nome, null, { cloud }), painted };
     if (f.tipo === "opzione") return { image: opzioneKey(f.indice + 1, head, f.label, passo, phase, cloud), painted };
     if (f.tipo === "pagina") return { image: paginaKey("altre 2", f.verso ? "opzioni 3-4" : "opzioni 1-2", !!f.verso, cloud), painted };
-    return { image: domandaKey(head, testoDomanda(req, st), passo, cloud), painted };
+    return { image: domandaKey(head, testoDomanda(req, st), [passo, nome].filter(Boolean).join(" \xB7 "), cloud), painted };
   }
   const c = req ? classifica(req, confDa(state2.globalSettings)) : null;
   if (kind === "approve-always") {
@@ -5343,7 +5385,7 @@ function rigaInBasso(kind, env) {
   }
   const lungo = kind === "approve-allow" && !!c?.lungo;
   return {
-    image: decisioneKey(kind, req, { err, depth, phase, lungo, target: c ? bersaglio(req, c) : "", label: settings.label }),
+    image: decisioneKey(kind, req, { err, depth, phase, lungo, target: c ? bersaglio(req, c) : "", label: settings.label || nome }),
     painted: { reqId: req?.id ?? null, rule: null, faccia: null, lungo }
   };
 }
@@ -5431,6 +5473,9 @@ var state = {
   cloudSessions: [],
   // id richiesta -> a che punto è la risposta a una domanda (domande.js)
   risposte: /* @__PURE__ */ new Map(),
+  // La sessione a cui la persona ha scelto di rispondere (tasto Focus o tasto Status);
+  // null = la richiesta più vecchia. Vedi richiestaCorrente in approve.js.
+  scelta: null,
   relay: { ok: false, err: null, at: 0, errori: 0, sessioni: 0 },
   lastHeadChangeAt: 0,
   globalSettings: {},
@@ -5659,6 +5704,7 @@ var TIMEOUT_PAD_S = 3;
 var approveSeq = 0;
 var hookServer = null;
 var renderApproveAll = () => renderAll(APPROVE_KINDS);
+var corrente = () => richiestaCorrente(state.approveQueue, state.scelta);
 var faDaApprovazione = (v) => APPROVE_KINDS.includes(v?.kind) || !!slotDi(v?.kind, v?.settings);
 var hasApproveKey = () => [...views.values()].some(faDaApprovazione);
 var tipoAdesso = (context, kind) => {
@@ -5667,8 +5713,17 @@ var tipoAdesso = (context, kind) => {
 };
 function queueChanged() {
   state.pending = pendingBySession(state.approveQueue);
+  if (state.scelta && !sessioniInAttesa(state.approveQueue).includes(state.scelta)) state.scelta = null;
   for (const id of [...state.risposte.keys()]) if (!state.approveQueue.some((r) => r.id === id)) state.risposte.delete(id);
-  renderAll([...APPROVE_KINDS, "approver-status", "approver-waiting"]);
+  renderAll([...APPROVE_KINDS, "approver-status", "approver-waiting", "focus-session"]);
+}
+function scegliSessione(sessionId) {
+  const prev = corrente()?.id ?? null;
+  state.scelta = sessionId;
+  noteHeadChange(prev);
+  state.lastHeadChangeAt = Date.now();
+  log(`approve: risposta alla sessione ${path3.basename(corrente()?.cwd ?? "") || sessionId}`);
+  renderAll([...APPROVE_KINDS, "approver-status", "approver-waiting", "focus-session"]);
 }
 function authFlagged() {
   const hits = hookServer?.stats.badPathHits;
@@ -5677,12 +5732,12 @@ function authFlagged() {
   return hits.filter((t) => now - t < BADPATH_WINDOW_MS).length >= BADPATH_MIN_HITS;
 }
 function noteHeadChange(prevId) {
-  const now = approvable(state.approveQueue)?.id ?? null;
+  const now = corrente()?.id ?? null;
   if (now !== prevId) state.lastHeadChangeAt = Date.now();
 }
 function answerAndDrop(ids, why) {
   if (!ids.length) return;
-  const prev = approvable(state.approveQueue)?.id ?? null;
+  const prev = corrente()?.id ?? null;
   for (const id of ids) {
     const { queue, req } = resolve(state.approveQueue, id);
     state.approveQueue = queue;
@@ -5716,7 +5771,7 @@ function onHookRequest(payload, ticket) {
     ticket
   };
   ticket.id = req.id;
-  const prev = approvable(state.approveQueue)?.id ?? null;
+  const prev = corrente()?.id ?? null;
   const { queue, evicted } = enqueue(state.approveQueue, req);
   state.approveQueue = queue;
   if (evicted) {
@@ -5728,7 +5783,7 @@ function onHookRequest(payload, ticket) {
 }
 var onHookDrop = (ticket) => {
   if (ticket.id == null) return;
-  const prev = approvable(state.approveQueue)?.id ?? null;
+  const prev = corrente()?.id ?? null;
   const { queue, req } = resolve(state.approveQueue, ticket.id);
   if (!req) return;
   state.approveQueue = queue;
@@ -6381,6 +6436,7 @@ function onKeyDown(context, kind) {
       return act(context, platform.openTerminal(s.path));
     }
     case "focus-session": {
+      if (sessioniInAttesa(state.approveQueue).length) return scegliSessione(prossimaScelta(state.approveQueue, state.scelta));
       const blocked = blockedSessions(state.sessions, Date.now(), state.activity, state.pending);
       const pool = blocked.length ? blocked : state.sessions;
       const n = pool.length;
@@ -6435,6 +6491,9 @@ function onKeyDown(context, kind) {
         idx = cy.idx;
       }
       const entry = statusEntry(resolved, cycling ? idx : null);
+      if (entry.sessionId && sessioniInAttesa(state.approveQueue).includes(entry.sessionId) && corrente()?.sessionId !== entry.sessionId) {
+        return scegliSessione(entry.sessionId);
+      }
       render(context, "approver-status");
       return apriRecord(context, entry.url ? { url: entry.url } : sessionByPid(entry.pid));
     }
@@ -6459,6 +6518,7 @@ function onKeyDown(context, kind) {
         const d = pressDecision({
           queue: state.approveQueue,
           shownId: shownReq.get(context) ?? null,
+          scelta: state.scelta,
           lastHeadChangeAt: state.lastHeadChangeAt,
           now: Date.now(),
           // Un tasto di consumi che è appena diventato Allow: un secondo intero prima di
@@ -6470,7 +6530,7 @@ function onKeyDown(context, kind) {
           renderApproveAll();
           return showAlert(context);
         }
-        const target = approvable(state.approveQueue);
+        const target = corrente();
         if (state.hookErr && !target?.cloud) return showAlert(context);
         if (isQuestion(target)) return premiDomanda(context, kind, target);
         if (kind === "approve-always") return apriRecord(context, sessioneDi(target));
@@ -6485,7 +6545,7 @@ function onKeyDown(context, kind) {
   }
 }
 function rispondi(id, body, perche) {
-  const prev = approvable(state.approveQueue)?.id ?? null;
+  const prev = corrente()?.id ?? null;
   const { queue, req } = resolve(state.approveQueue, id);
   if (!req) return false;
   state.approveQueue = queue;
@@ -6519,7 +6579,7 @@ function iniziaPressioneLunga(context, req) {
   annullaPressione(context);
   const timer = setTimeout(() => {
     pressioni.delete(context);
-    const ora = approvable(state.approveQueue);
+    const ora = corrente();
     if (!ora || ora.id !== req.id) return showAlert(context);
     rispondi(req.id, decisionBody("allow", req), "allow (pressione lunga)");
   }, LUNGO_MS);
@@ -6600,7 +6660,7 @@ function applicaRelay(snap) {
   let cambiata = false;
   const sparite = richiesteSparite(state.approveQueue, snap);
   if (sparite.length) {
-    const prev = approvable(state.approveQueue)?.id ?? null;
+    const prev = corrente()?.id ?? null;
     state.approveQueue = state.approveQueue.filter((r) => !sparite.includes(r.id));
     noteHeadChange(prev);
     cambiata = true;
@@ -6609,7 +6669,7 @@ function applicaRelay(snap) {
     for (const r of richiesteNuove(state.approveQueue, snap, new Set(gestiteCloud.keys()))) {
       const req = { id: ++approveSeq, ...voceDa(r, state.cloudSessions, adesso, snap.ora) };
       req.ticket = ticketCloud(req);
-      const prev = approvable(state.approveQueue)?.id ?? null;
+      const prev = corrente()?.id ?? null;
       const { queue, evicted } = enqueue(state.approveQueue, req);
       state.approveQueue = queue;
       if (evicted) evicted.ticket.respond(null);
