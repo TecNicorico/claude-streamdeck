@@ -26,6 +26,8 @@ const INSTALL_FIELD = { key: "_install", type: "install", label: "One-time setup
 // I consumi freschi dal terminale (src/consumi.js): la barra di stato di Claude Code li
 // manda al plugin a ogni risposta.
 const STATUSLINE_FIELD = { key: "_statusline", type: "statusline", label: "Consumi aggiornati dal terminale - incolla in ~/.claude/settings.json, al primo livello, poi riapri Claude Code" };
+// La sonda dei consumi (src/sonda.js): globale, accesa se non è spenta qui.
+const SONDA_FIELD = { key: "_sonda", type: "sonda", label: "Senza un terminale aperto, chiedi i consumi a Claude Code ogni 10 minuti (una richiesta minima a Haiku, mentre questa pagina è a schermo)" };
 // Un tasto che mostra e basta può fare da tasto della riga in basso mentre c'è una
 // richiesta in attesa, e tornare com'era dopo (vedi slotDi in src/view.js).
 const SLOT_FIELD = { key: "slot", type: "select", label: "Con una richiesta in attesa diventa", default: "", options: [
@@ -35,12 +37,13 @@ const SLOT_FIELD = { key: "slot", type: "select", label: "Con una richiesta in a
   { value: "approve-allow", label: "Allow / opzione a destra" },
 ] };
 const FIELDS = {
-  "dev.tapparello.agent-vitals.usage-session": [BUDGET_FIELD, SLOT_FIELD, STATUSLINE_FIELD],
-  "dev.tapparello.agent-vitals.usage-weekly": [BUDGET_FIELD, SLOT_FIELD, STATUSLINE_FIELD],
+  "dev.tapparello.agent-vitals.usage-session": [BUDGET_FIELD, SLOT_FIELD, SONDA_FIELD, STATUSLINE_FIELD],
+  "dev.tapparello.agent-vitals.usage-weekly": [BUDGET_FIELD, SLOT_FIELD, SONDA_FIELD, STATUSLINE_FIELD],
   "dev.tapparello.agent-vitals.usage-model": [
     { key: "model", type: "modelselect", label: "Model to display" },
     BUDGET_FIELD,
     SLOT_FIELD,
+    SONDA_FIELD,
     STATUSLINE_FIELD,
   ],
   "dev.tapparello.agent-vitals.burn-rate": [SLOT_FIELD],
@@ -186,6 +189,20 @@ function build() {
       err.style.cssText = "font-size:11px;color:#f87171;margin-top:4px;display:none";
       div.append(lab, ta, btn, note, err);
       ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd: "getInstall" } }));
+    } else if (f.type === "sonda") {
+      const l = document.createElement("label");
+      l.className = "chk";
+      const c = document.createElement("input");
+      c.type = "checkbox";
+      c.id = "sondaCheck";
+      c.checked = gs.sondaConsumi !== false;
+      c.onchange = () => {
+        if (!gsReady) { c.checked = gs.sondaConsumi !== false; return; }
+        if (c.checked) delete gs.sondaConsumi; else gs.sondaConsumi = false;
+        ws.send(JSON.stringify({ event: "setGlobalSettings", context: piUuid, payload: gs }));
+      };
+      l.append(c, document.createTextNode(f.label));
+      div.append(l);
     } else if (f.type === "statusline") {
       const lab = document.createElement("label");
       lab.textContent = f.label;
@@ -302,7 +319,7 @@ function build() {
 }
 const POSTA_ACTION = "dev.tapparello.agent-vitals.posta";
 const THECORE_ACTION = "dev.tapparello.agent-vitals.thecore";
-const GS_ACTIONS = ["dev.tapparello.agent-vitals.usage-meter", POSTA_ACTION, THECORE_ACTION];
+const GS_ACTIONS = ["dev.tapparello.agent-vitals.usage-meter", "dev.tapparello.agent-vitals.usage-model", POSTA_ACTION, THECORE_ACTION];
 function askPosta() { if (ws && action === POSTA_ACTION) ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd: "getPosta" } })); }
 function askTheCore() { ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd: "getTheCore" } })); }
 // TheCore: impostazioni condivise da tutti i tasti TheCore (global settings), come
@@ -433,6 +450,8 @@ function connectElgatoStreamDeckSocket(port, uuid, evt, info, actionInfo) {
     if (m.event === "didReceiveGlobalSettings") {
       gs = m.payload?.settings ?? {};
       gsReady = true;
+      const sc = document.getElementById("sondaCheck");
+      if (sc) sc.checked = gs.sondaConsumi !== false;
       if (action === "dev.tapparello.agent-vitals.usage-meter") buildRates();
       if (RELAY_ACTIONS.includes(action)) buildRelay();
       if (action === POSTA_ACTION) build();

@@ -3873,6 +3873,88 @@ function focusStrategyForBundle(bundle) {
   return "app";
 }
 
+// src/sonda.js
+var SONDA_MS = 10 * 6e4;
+var SONDA_TIMEOUT_MS = 6e4;
+var SONDA_ERRORE_MS = 30 * 6e4;
+var NOME_CARTELLA = "agent-vitals-sonda";
+var ARGOMENTI_SONDA = [
+  "-p",
+  "ok",
+  "--model",
+  "haiku",
+  "--tools=",
+  "--strict-mcp-config",
+  "--setting-sources",
+  "project",
+  "--no-session-persistence",
+  "--system-prompt",
+  "Reply with: ok",
+  "--output-format",
+  "stream-json",
+  "--verbose",
+  "--max-turns",
+  "1"
+];
+var percento01 = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 10 ? Math.round(v * 1e3) / 10 : null;
+var istante = (v) => {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return new Date(n < 1e12 ? n * 1e3 : n).toISOString();
+};
+function letturaSonda(stdout, now) {
+  let ultimo = null;
+  for (const riga of String(stdout ?? "").split(/\r?\n/)) {
+    if (!riga.includes("rate_limit_event")) continue;
+    let e;
+    try {
+      e = JSON.parse(riga);
+    } catch {
+      continue;
+    }
+    const w = e?.type === "rate_limit_event" ? e.rate_limit_info?.unifiedWindows : null;
+    if (w && typeof w === "object") ultimo = w;
+  }
+  if (!ultimo) return null;
+  const fin = (x) => percento01(x?.utilization) == null ? null : { pct: percento01(x.utilization), resetsAt: istante(x.resetsAt) };
+  const fiveHour = fin(ultimo.five_hour), weekly = fin(ultimo.seven_day);
+  if (!fiveHour && !weekly) return null;
+  return { at: now, usage: { fiveHour, weekly, weeklyOpus: null, scopedPct: null, scopedName: null, models: [] } };
+}
+function serveSonda({ now, visibile, spenta = false, usageAt = 0, ultimaAt = 0, erroreAt = 0, forza = false }) {
+  if (spenta || !visibile) return false;
+  if (now - erroreAt < (forza ? 6e4 : SONDA_ERRORE_MS)) return false;
+  if (forza) return now - ultimaAt >= 6e4;
+  if (now - usageAt < SONDA_MS) return false;
+  return now - ultimaAt >= SONDA_MS;
+}
+function candidatiClaude({ platform: platform2, env = {}, home }) {
+  const out = [];
+  const win = platform2 === "win32";
+  const sep = win ? "\\" : "/";
+  const nomi = win ? ["claude.exe", "claude.cmd"] : ["claude"];
+  if (win) {
+    out.push(`${home}\\.local\\bin\\claude.exe`);
+    if (env.APPDATA) out.push(`${env.APPDATA}\\npm\\claude.cmd`);
+  } else {
+    out.push(`${home}/.local/bin/claude`, "/opt/homebrew/bin/claude", "/usr/local/bin/claude", `${home}/.claude/local/claude`);
+  }
+  for (const dir of String(env.PATH ?? env.Path ?? "").split(win ? ";" : ":")) {
+    if (!dir) continue;
+    for (const n of nomi) out.push(`${dir.replace(/[\\/]+$/, "")}${sep}${n}`);
+  }
+  return [...new Set(out)];
+}
+function eSonda(sessione2, cartella) {
+  const a = String(sessione2?.cwd ?? "").replace(/[\\/]+$/, "").toLowerCase();
+  const b = String(cartella ?? "").replace(/[\\/]+$/, "").toLowerCase();
+  return !!a && a === b;
+}
+function rigaCmd(eseguibile, args) {
+  const q = (s) => /[\s"&|<>^]/.test(s) || s === "" ? `"${String(s).replace(/"/g, '""')}"` : s;
+  return `"${q(eseguibile).replace(/^"|"$/g, "")}" ${args.map(q).join(" ")}`;
+}
+
 // src/consumi.js
 function pickBucket(o) {
   if (!o || typeof o !== "object") return null;
@@ -3977,7 +4059,7 @@ function formaDesktop(raw) {
   const ultimo = samples[samples.length - 1];
   return `${samples.length} samples, last {${chiavi(ultimo)}}, u {${chiavi(ultimo?.u)}}`;
 }
-var istante = (v) => {
+var istante2 = (v) => {
   const n = Number(v);
   if (!Number.isFinite(n) || n <= 0) return null;
   return new Date(n < 1e12 ? n * 1e3 : n).toISOString();
@@ -3985,7 +4067,7 @@ var istante = (v) => {
 function letturaStatusline(payload, now) {
   const rl = payload?.rate_limits;
   if (!rl || typeof rl !== "object") return null;
-  const fin = (w) => percento(w?.used_percentage) == null ? null : { pct: w.used_percentage, resetsAt: istante(w.resets_at) };
+  const fin = (w) => percento(w?.used_percentage) == null ? null : { pct: w.used_percentage, resetsAt: istante2(w.resets_at) };
   const fiveHour = fin(rl.five_hour), weekly = fin(rl.seven_day);
   if (!fiveHour && !weekly) return null;
   return { at: now, usage: { fiveHour, weekly, weeklyOpus: null, scopedPct: null, scopedName: null, models: [] } };
@@ -4226,7 +4308,7 @@ function hasSubscriptionData(usage) {
 }
 function gaugeSource({ usage, usageErr, usageAt, usageSrc = null, now }, hasLocal = false) {
   if (usage == null && !usageErr) return "pending";
-  const validit\u00E0 = usageSrc === "desktop" || usageSrc === "statusline" ? DESKTOP_FRESH_MS : USAGE_FRESH_MS;
+  const validit\u00E0 = usageSrc && usageSrc !== "api" ? DESKTOP_FRESH_MS : USAGE_FRESH_MS;
   const fresh = hasSubscriptionData(usage) && now - (usageAt ?? 0) < validit\u00E0;
   if (fresh) return "subscription";
   if (usageErr && String(usageErr).includes("429")) return "throttled";
@@ -6620,6 +6702,86 @@ function onStatusline(payload) {
   }
   return rigaStatusline(payload);
 }
+var SONDA_DIR = path3.join(os.tmpdir(), NOME_CARTELLA);
+var sonda = { ultimaAt: 0, erroreAt: 0, err: null, exe: void 0, inCorso: false };
+function trovaClaude() {
+  if (sonda.exe && fs.existsSync(sonda.exe)) return sonda.exe;
+  sonda.exe = candidatiClaude({ platform: process.platform, env: process.env, home: os.homedir() }).find((p) => {
+    try {
+      return fs.statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  }) ?? null;
+  if (sonda.exe) log("usage probe: Claude Code at", sonda.exe);
+  return sonda.exe;
+}
+function eseguiSonda(exe) {
+  return new Promise((resolve2, reject) => {
+    const opts = { cwd: SONDA_DIR, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] };
+    const child = /\.cmd$/i.test(exe) ? spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `"${rigaCmd(exe, ARGOMENTI_SONDA)}"`], { ...opts, windowsVerbatimArguments: true }) : spawn(exe, ARGOMENTI_SONDA, opts);
+    let out = "", err = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (c) => {
+      if (out.length < 1e6) out += c;
+    });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (c) => {
+      if (err.length < 4e3) err += c;
+    });
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`no answer in ${SONDA_TIMEOUT_MS / 1e3}s`));
+    }, SONDA_TIMEOUT_MS);
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (out.includes("rate_limit_event")) resolve2(out);
+      else reject(new Error(`exit ${code}: ${(err.trim() || out.trim()).slice(0, 240) || "no output"}`));
+    });
+  });
+}
+async function pollSonda({ forza = false } = {}) {
+  if (sonda.inCorso) return;
+  const now = Date.now();
+  const visibile = [...views.values()].some((v) => GAUGE_WINDOW[v.kind] || v.kind === "burn-rate");
+  if (!serveSonda({
+    now,
+    visibile,
+    forza,
+    spenta: state.globalSettings?.sondaConsumi === false,
+    usageAt: state.usageAt,
+    ultimaAt: sonda.ultimaAt,
+    erroreAt: sonda.erroreAt
+  })) return;
+  const exe = trovaClaude();
+  if (!exe) {
+    sonda.erroreAt = now;
+    if (sonda.err !== "not found") log("usage probe: Claude Code not found (PATH, ~/.local/bin, npm)");
+    sonda.err = "not found";
+    return;
+  }
+  sonda.inCorso = true;
+  sonda.ultimaAt = now;
+  try {
+    fs.mkdirSync(SONDA_DIR, { recursive: true });
+    const l = letturaSonda(await eseguiSonda(exe), Date.now());
+    if (!l) throw new Error("no rate_limit_event with windows in the output");
+    if (sonda.err) log("usage probe: working again");
+    sonda.erroreAt = 0;
+    sonda.err = null;
+    adottaConsumi(l.usage, l.at, "sonda");
+  } catch (e) {
+    sonda.erroreAt = Date.now();
+    sonda.err = String(e?.message ?? e);
+    log("usage probe failed:", sonda.err);
+  } finally {
+    sonda.inCorso = false;
+  }
+}
 async function pollUsage({ forza = false } = {}) {
   if (Date.now() < apiFermaFino) return;
   if (!forza && !serveEndpoint({ now: Date.now(), usageAt: state.usageAt, src: state.usageSrc, apiOkAt: state.apiOkAt })) return;
@@ -6751,6 +6913,7 @@ async function pollSessions() {
       } catch {
       }
     }
+    out = out.filter((s) => !eSonda(s, SONDA_DIR));
     out = await dropRecycledPids(out);
     out.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
     for (const s of out) {
@@ -7502,6 +7665,7 @@ function onKeyDown(context, kind) {
         return render(context, kind);
       }
       pollDesktopUsage();
+      pollSonda({ forza: true });
       if (Date.now() - lastUsageAttempt > 3e4) pollUsage();
       return;
     case "today":
@@ -8025,6 +8189,7 @@ if (process.argv.includes("--selftest")) {
       setTitle(context);
       render(context, kindOf(action));
       if (kindOf(action) === "usage-meter" || GAUGE_WINDOW[kindOf(action)]) pollUsageMeter();
+      if (GAUGE_WINDOW[kindOf(action)]) setTimeout(() => pollSonda(), 1500);
       if (kindOf(action) === "posta") pollPosta();
       if (kindOf(action) === "thecore") pollTheCore();
     } else if (event === "willDisappear") {
@@ -8100,6 +8265,7 @@ if (process.argv.includes("--selftest")) {
     }, usageDelay);
   })();
   setInterval(pollDesktopUsage, 6e4);
+  setInterval(pollSonda, 6e4);
   setInterval(pollSessions, 5e3);
   setInterval(pollToday, 3e5);
   pollBurn();

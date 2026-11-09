@@ -262,10 +262,10 @@ export function hasSubscriptionData(usage) {
 }
 export function gaugeSource({ usage, usageErr, usageAt, usageSrc = null, now }, hasLocal = false) {
   if (usage == null && !usageErr) return "pending";
-  // Le fonti locali (Desktop, la barra di stato del terminale) valgono di più: il
+  // Le fonti locali (Desktop, la barra di stato del terminale, la sonda) valgono di più: il
   // tasto dice da quanto è stato letto il numero, e una finestra già ripartita la
   // toglie finestraValida() (src/consumi.js).
-  const validità = usageSrc === "desktop" || usageSrc === "statusline" ? DESKTOP_FRESH_MS : USAGE_FRESH_MS;
+  const validità = usageSrc && usageSrc !== "api" ? DESKTOP_FRESH_MS : USAGE_FRESH_MS;
   const fresh = hasSubscriptionData(usage) && now - (usageAt ?? 0) < validità;
   if (fresh) return "subscription";
   if (usageErr && String(usageErr).includes("429")) return "throttled";

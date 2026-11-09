@@ -9,6 +9,7 @@ import path from "node:path";
 import { spawn, execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { escapeAppleScript, parseHotkey, hotkeyClause, classifyCustomCommand, parseKeychainToken, parsePsTree, hostAppForPid, focusStrategyForBundle, terminalFocusScript, parseProcStarts } from "./osa.js";
+import { letturaSonda, serveSonda, candidatiClaude, eSonda, rigaCmd, ARGOMENTI_SONDA, SONDA_TIMEOUT_MS, NOME_CARTELLA } from "./sonda.js";
 import { usageDaRisposta, percorsiDesktop, letturaDesktop, formaDesktop, letturaStatusline, rigaStatusline, statuslineFragment, completa, serveEndpoint, ritardoDopo429, API_BASE_MS } from "./consumi.js";
 import { windowStartMs, parseRequests, mergeById, aggregate, aggregateByModel, budgetPct, localDay, newDayCounts, foldDayChunk, dayCountsTotals } from "./usage.js";
 import { resolveStatusKey, statusEntry, autoSlot, sessionState, blockedSessions, sessionSig, transcriptPathFor, pidLooksRecycled } from "./status.js";
@@ -215,6 +216,75 @@ function onStatusline(payload) {
   return rigaStatusline(payload);
 }
 
+// La sonda (src/sonda.js): quando nessuna fonte ha un numero fresco e un tasto dei
+// consumi è a schermo, una richiesta minima a Claude Code ne riporta uno. Parte dalla
+// sua cartella, così la sua sessione si riconosce e non finisce fra quelle in corso.
+const SONDA_DIR = path.join(os.tmpdir(), NOME_CARTELLA);
+const sonda = { ultimaAt: 0, erroreAt: 0, err: null, exe: undefined, inCorso: false };
+function trovaClaude() {
+  if (sonda.exe && fs.existsSync(sonda.exe)) return sonda.exe;
+  sonda.exe = candidatiClaude({ platform: process.platform, env: process.env, home: os.homedir() })
+    .find((p) => { try { return fs.statSync(p).isFile(); } catch { return false; } }) ?? null;
+  if (sonda.exe) log("usage probe: Claude Code at", sonda.exe);
+  return sonda.exe;
+}
+function eseguiSonda(exe) {
+  return new Promise((resolve, reject) => {
+    // Un .cmd (Claude Code installato da npm) parte solo da cmd.exe. windowsHide: lo
+    // Stream Deck è un'app grafica, e senza una console si aprirebbe a ogni sonda.
+    // stdin chiuso: con una pipe aperta `claude -p` aspetterebbe il resto del prompt.
+    const opts = { cwd: SONDA_DIR, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] };
+    const child = /\.cmd$/i.test(exe)
+      ? spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `"${rigaCmd(exe, ARGOMENTI_SONDA)}"`], { ...opts, windowsVerbatimArguments: true })
+      : spawn(exe, ARGOMENTI_SONDA, opts);
+    let out = "", err = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (c) => { if (out.length < 1_000_000) out += c; });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (c) => { if (err.length < 4000) err += c; });
+    const timer = setTimeout(() => { child.kill(); reject(new Error(`no answer in ${SONDA_TIMEOUT_MS / 1000}s`)); }, SONDA_TIMEOUT_MS);
+    child.on("error", (e) => { clearTimeout(timer); reject(e); });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (out.includes("rate_limit_event")) resolve(out);
+      else reject(new Error(`exit ${code}: ${(err.trim() || out.trim()).slice(0, 240) || "no output"}`));
+    });
+  });
+}
+async function pollSonda({ forza = false } = {}) {
+  if (sonda.inCorso) return;
+  const now = Date.now();
+  const visibile = [...views.values()].some((v) => GAUGE_WINDOW[v.kind] || v.kind === "burn-rate");
+  if (!serveSonda({
+    now, visibile, forza, spenta: state.globalSettings?.sondaConsumi === false,
+    usageAt: state.usageAt, ultimaAt: sonda.ultimaAt, erroreAt: sonda.erroreAt,
+  })) return;
+  const exe = trovaClaude();
+  if (!exe) {
+    sonda.erroreAt = now;
+    if (sonda.err !== "not found") log("usage probe: Claude Code not found (PATH, ~/.local/bin, npm)");
+    sonda.err = "not found";
+    return;
+  }
+  sonda.inCorso = true;
+  sonda.ultimaAt = now;
+  try {
+    fs.mkdirSync(SONDA_DIR, { recursive: true });
+    const l = letturaSonda(await eseguiSonda(exe), Date.now());
+    if (!l) throw new Error("no rate_limit_event with windows in the output");
+    if (sonda.err) log("usage probe: working again");
+    sonda.erroreAt = 0;
+    sonda.err = null;
+    adottaConsumi(l.usage, l.at, "sonda");
+  } catch (e) {
+    sonda.erroreAt = Date.now();
+    sonda.err = String(e?.message ?? e);
+    log("usage probe failed:", sonda.err);
+  } finally {
+    sonda.inCorso = false;
+  }
+}
+
 async function pollUsage({ forza = false } = {}) {
   if (Date.now() < apiFermaFino) return;
   if (!forza && !serveEndpoint({ now: Date.now(), usageAt: state.usageAt, src: state.usageSrc, apiOkAt: state.apiOkAt })) return;
@@ -352,6 +422,9 @@ async function pollSessions() {
         if (s.pid && pidAlive(s.pid)) out.push(s);
       } catch {}
     }
+    // La sonda dei consumi è una sessione di Claude Code anche lei, per cinque secondi:
+    // non è una sessione della persona.
+    out = out.filter((s) => !eSonda(s, SONDA_DIR));
     // Before anything derives from this list — including the approver's staleness
     // baselines below — discard sessions whose pid was recycled after a crash.
     out = await dropRecycledPids(out);
@@ -1256,6 +1329,7 @@ function onKeyDown(context, kind) {
         return render(context, kind);
       }
       pollDesktopUsage();
+      pollSonda({ forza: true });
       if (Date.now() - lastUsageAttempt > 30_000) pollUsage();
       return;
     case "today":
@@ -1803,6 +1877,9 @@ if (process.argv.includes("--selftest")) {
       setTitle(context);
       render(context, kindOf(action));
       if (kindOf(action) === "usage-meter" || GAUGE_WINDOW[kindOf(action)]) pollUsageMeter();
+      // Dopo un attimo: tutti i tasti della pagina arrivano insieme, e la sonda guarda
+      // se ce n'è uno dei consumi.
+      if (GAUGE_WINDOW[kindOf(action)]) setTimeout(() => pollSonda(), 1500);
       if (kindOf(action) === "posta") pollPosta();
       if (kindOf(action) === "thecore") pollTheCore();
     } else if (event === "willDisappear") {
@@ -1880,6 +1957,7 @@ if (process.argv.includes("--selftest")) {
 
   (function usageLoop() { setTimeout(async () => { await pollUsage(); usageLoop(); }, usageDelay); })();
   setInterval(pollDesktopUsage, 60_000);
+  setInterval(pollSonda, 60_000);
   setInterval(pollSessions, 5_000);
   setInterval(pollToday, 300_000);
   pollBurn();

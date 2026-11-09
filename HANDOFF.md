@@ -197,6 +197,21 @@ today/burn, it's a property of the log format.
   Windows and `"@-"` quoted, so cmd, PowerShell and Git Bash all run it. The snippet
   is in the usage keys' Property Inspector (`statuslineFragment`). Only terminal
   sessions render a status line: cloud and VS Code sessions do not feed it.
+- **Without a terminal, the probe** (`src/sonda.js`, 1.14.0): `claude -p "ok" --model
+  haiku --tools= --strict-mcp-config --setting-sources project --no-session-persistence
+  --system-prompt … --output-format stream-json --verbose --max-turns 1`, run from
+  `os.tmpdir()/agent-vitals-sonda`. Its stream carries `rate_limit_event` →
+  `rate_limit_info.unifiedWindows.{five_hour,seven_day}.{utilization 0–1, resetsAt s}`
+  (verified on 2.1.319). Measured: ~5 s, ~1,400 input tokens (mostly 1h cache after
+  the first), 4 output. `--tools=` with the equals sign because an empty argument does
+  not survive every Windows shell; `--setting-sources project` with an empty cwd keeps
+  the user's hooks and status line out; `--bare` is NOT usable (it never reads OAuth).
+  It runs only when a usage key is visible, no reading is under ten minutes old, at
+  most every ten minutes (30 after an error); a press on Session/Weekly forces one
+  (at most one a minute). It shows up in `~/.claude/sessions` for a few seconds, so
+  `pollSessions` drops sessions whose cwd is the probe folder (`eSonda`). A `.cmd`
+  install (npm) runs through `cmd.exe /d /s /c` (`rigaCmd`); `windowsHide` keeps a
+  console from flashing. Off with global setting `sondaConsumi: false` (PI checkbox).
 - **Local readings and their age:** `gaugeSource` gives `desktop` and `statusline`
   six hours. From a local source a window already reset is not shown
   (`finestraValida`: its reset time, or the reading's age against the window), and

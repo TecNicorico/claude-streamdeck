@@ -12,6 +12,8 @@ The usage endpoint's rate limit is **per account** and shared with every Claude 
 
 Desktop rewrites that file only now and then (on one Windows PC: once or twice a day), so for a 5-hour gauge that keeps up, let **Claude Code's status line** feed the plugin. Claude Code hands the status line the same percentages it receives with every answer, so they stay fresh while the usage endpoint is answering 429. Copy the snippet from any usage key's settings (**Consumi aggiornati dal terminale**) into `~/.claude/settings.json`, next to `"hooks"`, and reopen Claude Code: the status line then shows `Opus 5.5 · my-project · 5h 23% · 7d 41%`, and the deck follows it. It replaces a status line you already have, and only works while a Claude Code session is open in a terminal.
 
+Without a terminal session, the plugin **asks Claude Code itself** every ten minutes, and only while a usage key is on screen: a minimal `claude -p` run (Haiku, no tools, no MCP servers, none of your settings or hooks, nothing saved to disk) whose stream carries the same percentages. Measured: about five seconds, ~1,400 input tokens mostly from cache, 4 output tokens — a negligible slice of the 5-hour window. A press on the Session or Weekly key asks at once. Untick **"Senza un terminale aperto, chiedi i consumi a Claude Code…"** in the usage keys' settings to turn it off.
+
 ![Every Agent Vitals key: usage gauges, shortcuts, session status, and the permission-prompt keys](docs/keys.png)
 
 ## Keys
