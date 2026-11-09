@@ -9,6 +9,7 @@ import path from "node:path";
 import { spawn, execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { escapeAppleScript, parseHotkey, hotkeyClause, classifyCustomCommand, parseKeychainToken, parsePsTree, hostAppForPid, focusStrategyForBundle, terminalFocusScript, parseProcStarts } from "./osa.js";
+import { usageDaRisposta, percorsiDesktop, letturaDesktop, completa, serveEndpoint, ritardoDopo429, API_BASE_MS } from "./consumi.js";
 import { windowStartMs, parseRequests, mergeById, aggregate, aggregateByModel, budgetPct, localDay, newDayCounts, foldDayChunk, dayCountsTotals } from "./usage.js";
 import { resolveStatusKey, statusEntry, autoSlot, sessionState, blockedSessions, sessionSig, transcriptPathFor, pidLooksRecycled } from "./status.js";
 import { randomBytes, createHash } from "node:crypto";
@@ -88,6 +89,8 @@ const state = {
   usageMeter: null,   // { [window]: {tokens, cost, in, out} } from pollUsageMeter
   usageMeterModels: null, // [{model,tokens,cost}] over 7d, for the model key in local mode
   usageAt: 0,
+  usageSrc: null,     // "desktop" | "api": da dove viene state.usage (src/consumi.js)
+  apiOkAt: 0,         // l'ultima risposta buona dell'endpoint
   sessions: [],
   today: null,
   burn: null,
@@ -122,17 +125,7 @@ const state = {
   pluginUUID: null,
 };
 
-function pickBucket(o) {
-  if (!o || typeof o !== "object") return null;
-  let pct = null;
-  // The usage endpoint reports utilization on a 0–100 scale (e.g. 13 = 13%), so
-  // use it as-is. An earlier 0–1 fraction heuristic mis-scaled exactly 1% to 100%.
-  if (typeof o.utilization === "number") pct = o.utilization;
-  const resetsAt = o.resets_at ?? o.resetsAt ?? null;
-  return pct == null && !resetsAt ? null : { pct, resetsAt };
-}
-
-const USAGE_DELAY_BASE = 120_000;
+const USAGE_DELAY_BASE = API_BASE_MS;
 let usageDelay = USAGE_DELAY_BASE;
 let lastUsageAttempt = 0;
 
@@ -144,10 +137,59 @@ let lastUsageAttempt = 0;
 const CACHE_FILE = path.join(os.tmpdir(), "agent-vitals-usage-cache.json");
 try {
   const c = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
-  if (Date.now() - c.at < 30 * 60_000) { state.usage = c.usage; state.usageAt = c.at; }
+  if (Date.now() - c.at < 30 * 60_000) {
+    state.usage = c.usage; state.usageAt = c.at; state.usageSrc = c.src ?? "api";
+    if (state.usageSrc === "api") state.apiOkAt = c.at;
+  }
 } catch {}
 
-async function pollUsage() {
+// Una lettura nuova dei consumi, da qualunque fonte. Una lettura più vecchia di
+// quella che c'è non passa: il file di Desktop può essere fermo da ore mentre
+// l'endpoint ha appena risposto, e viceversa.
+function adottaConsumi(usage, at, src) {
+  if (src !== "api" && at <= state.usageAt) return false;
+  if (src !== state.usageSrc) log(`usage source: ${src} (sample ${Math.round((Date.now() - at) / 60_000)}m old)`);
+  state.usage = src === "desktop" ? completa(usage, state.usage, state.usageAt, Date.now()) : usage;
+  state.usageAt = at;
+  state.usageSrc = src;
+  const fp5 = state.usage.fiveHour?.pct;
+  if (typeof fp5 === "number") {
+    state.pctHistory.push({ t: at, pct: fp5 });
+    state.pctHistory = state.pctHistory.filter((h) => at - h.t < 3.6e6);
+  }
+  try { fs.writeFileSync(CACHE_FILE, JSON.stringify({ usage: state.usage, at, src })); } catch {}
+  scheduleResetPoll();
+  renderAll(["usage-session", "usage-weekly", "usage-model", "burn-rate"]);
+  return true;
+}
+
+// Il file in cui Claude Desktop salva da sé le percentuali (src/consumi.js): nessuna
+// richiesta ad Anthropic, quindi lo si può leggere ogni minuto. Si rilegge solo se
+// è cambiato.
+const desktopSeen = new Map(); // percorso -> mtimeMs
+let desktopTrovato = null;     // il percorso da cui è arrivata l'ultima lettura, per il log
+async function pollDesktopUsage() {
+  const candidati = percorsiDesktop({
+    platform: process.platform, env: process.env, home: os.homedir(),
+    listDir: (d) => { try { return fs.readdirSync(d); } catch { return []; } },
+  });
+  let best = null, bestPath = null;
+  for (const fp of candidati) {
+    try {
+      const { mtimeMs } = await fsp.stat(fp);
+      if (desktopSeen.get(fp) === mtimeMs) continue;
+      desktopSeen.set(fp, mtimeMs);
+      const l = letturaDesktop(await fsp.readFile(fp, "utf8"));
+      if (l && (!best || l.at > best.at)) { best = l; bestPath = fp; }
+    } catch {}
+  }
+  if (!best) return;
+  if (bestPath !== desktopTrovato) { desktopTrovato = bestPath; log("usage: Claude Desktop history at", bestPath); }
+  adottaConsumi(best.usage, best.at, "desktop");
+}
+
+async function pollUsage({ forza = false } = {}) {
+  if (!forza && !serveEndpoint({ now: Date.now(), usageAt: state.usageAt, src: state.usageSrc, apiOkAt: state.apiOkAt })) return;
   lastUsageAttempt = Date.now();
   try {
     const token = await platform.readToken();
@@ -159,7 +201,10 @@ async function pollUsage() {
         "Content-Type": "application/json",
       },
     });
-    if (res.status === 429) { usageDelay = Math.min(usageDelay * 2, 900_000); throw new Error(`usage endpoint HTTP 429 (backing off to ${usageDelay / 1000}s)`); }
+    if (res.status === 429) {
+      usageDelay = ritardoDopo429(usageDelay, res.headers.get("retry-after"));
+      throw new Error(`usage endpoint HTTP 429 (backing off to ${usageDelay / 1000}s)`);
+    }
     if (!res.ok) throw new Error(`usage endpoint HTTP ${res.status}`);
     usageDelay = USAGE_DELAY_BASE;
     const j = await res.json();
@@ -167,40 +212,9 @@ async function pollUsage() {
       state.loggedRaw = true;
       log("usage raw shape:", JSON.stringify(j).slice(0, 1200));
     }
-    const limits = Array.isArray(j.limits) ? j.limits : [];
-    const fromLimit = (kind) => {
-      const l = limits.find((x) => x.kind === kind);
-      return l ? { pct: l.percent, resetsAt: l.resets_at } : null;
-    };
-    const scoped = limits.find((x) => x.kind === "weekly_scoped");
-    // Every per-model bucket the account exposes, for the selectable model gauge
-    const models = [];
-    for (const l of limits) {
-      if (l.kind !== "weekly_scoped") continue;
-      const name = l.scope?.model?.display_name;
-      if (name && typeof l.percent === "number") models.push({ name, pct: l.percent, resetsAt: l.resets_at ?? null });
-    }
-    for (const [key, name] of [["seven_day_opus", "Opus"], ["seven_day_sonnet", "Sonnet"]]) {
-      const b = pickBucket(j[key]);
-      if (b?.pct != null && !models.some((m) => m.name === name)) models.push({ name, pct: b.pct, resetsAt: b.resetsAt });
-    }
-    state.usage = {
-      fiveHour: pickBucket(j.five_hour) ?? fromLimit("session"),
-      weekly: pickBucket(j.seven_day) ?? fromLimit("weekly_all"),
-      weeklyOpus: pickBucket(j.seven_day_opus),
-      scopedPct: scoped?.percent ?? null,
-      scopedName: scoped?.scope?.model?.display_name ?? null,
-      models,
-    };
     state.usageErr = null;
-    state.usageAt = Date.now();
-    const fp5 = state.usage.fiveHour?.pct;
-    if (typeof fp5 === "number") {
-      state.pctHistory.push({ t: state.usageAt, pct: fp5 });
-      state.pctHistory = state.pctHistory.filter((h) => state.usageAt - h.t < 3.6e6);
-    }
-    try { fs.writeFileSync(CACHE_FILE, JSON.stringify({ usage: state.usage, at: state.usageAt })); } catch {}
-    scheduleResetPoll();
+    state.apiOkAt = Date.now();
+    adottaConsumi(usageDaRisposta(j), state.apiOkAt, "api");
   } catch (e) {
     state.usageErr = String(e.message ?? e);
     log("usage poll failed:", state.usageErr);
@@ -219,7 +233,8 @@ function scheduleResetPoll() {
     .filter((d) => d > 0 && d < 6 * 3.6e6);
   if (!deltas.length) return;
   clearTimeout(resetTimer);
-  resetTimer = setTimeout(pollUsage, Math.min(...deltas) + 8000);
+  // Forzato: anche con Desktop fresco, dopo un reset l'ora del prossimo la sa solo l'endpoint.
+  resetTimer = setTimeout(() => pollUsage({ forza: true }), Math.min(...deltas) + 8000);
 }
 
 // mtime of a session's transcript. The slugified path is only a hint (the
@@ -1206,6 +1221,7 @@ function onKeyDown(context, kind) {
         pollUsageMeter();
         return render(context, kind);
       }
+      pollDesktopUsage();
       if (Date.now() - lastUsageAttempt > 30_000) pollUsage();
       return;
     case "today":
@@ -1662,9 +1678,13 @@ async function pollTheCore(forza = false) {
 // ---------- selftest mode (no Stream Deck needed) ----------
 if (process.argv.includes("--selftest")) {
   (async () => {
-    log("selftest: polling usage…");
-    await pollUsage();
-    log("selftest usage:", state.usage ? JSON.stringify(state.usage) : `ERROR: ${state.usageErr}`);
+    log("selftest: reading Claude Desktop usage history…");
+    await pollDesktopUsage();
+    log("selftest desktop:", desktopTrovato ? `${desktopTrovato} (sample ${Math.round((Date.now() - state.usageAt) / 60_000)}m old)` : "not found");
+    log("selftest: polling usage endpoint…");
+    await pollUsage({ forza: true });
+    log("selftest usage:", state.usage ? `${state.usageSrc} ${JSON.stringify(state.usage)}` : `ERROR: ${state.usageErr}`);
+    if (state.usageErr) log("selftest endpoint:", state.usageErr);
     await pollSessions();
     log("selftest sessions:", state.sessions.map((s) => `${s.name}[${s.status}]`).join(", ") || "(none)");
     log("selftest states:", state.sessions.map((s) => `${s.name}=${sessionState(s, Date.now(), state.activity.get(s.sessionId) ?? null)}${s.waitingFor ? "(" + s.waitingFor + ")" : ""}`).join(", ") || "(none)");
@@ -1725,7 +1745,8 @@ if (process.argv.includes("--selftest")) {
     send({ event: registerEvent, uuid: pluginUUID });
     log("registered with Stream Deck");
     send({ event: "getGlobalSettings", context: pluginUUID });
-    if (Date.now() - state.usageAt > 90_000) pollUsage();
+    // Prima il file di Desktop, che non costa niente; l'endpoint solo se non basta.
+    pollDesktopUsage().finally(() => { if (Date.now() - state.usageAt > 90_000) pollUsage(); });
     pollSessions();
     pollToday();
   });
@@ -1824,6 +1845,7 @@ if (process.argv.includes("--selftest")) {
   });
 
   (function usageLoop() { setTimeout(async () => { await pollUsage(); usageLoop(); }, usageDelay); })();
+  setInterval(pollDesktopUsage, 60_000);
   setInterval(pollSessions, 5_000);
   setInterval(pollToday, 300_000);
   pollBurn();

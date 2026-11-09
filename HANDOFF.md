@@ -154,11 +154,26 @@ today/burn, it's a property of the log format.
 
 ## Usage-limit gauges vs. local transcript data — two different sources
 
-- Session/Weekly/Model gauges hit `GET
-  https://api.anthropic.com/api/oauth/usage` (undocumented, OAuth token
-  from `~/.claude/.credentials.json`) — this is server-computed truth, same
-  numbers `/usage` shows in Claude Code. Trust these over anything derived
-  from local files.
+- Session/Weekly/Model gauges read **two sources of the same server numbers**
+  (`src/consumi.js`, since 1.12.0): first Claude Desktop's own history file
+  `plan-usage-history.json` (`{version, samples:[{t ms, org, u:{fh, sd, so, sn}}]}`,
+  percent; `%APPDATA%\Claude\` or, for the Microsoft Store build,
+  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`; macOS
+  `~/Library/Application Support/Claude/`), then `GET
+  https://api.anthropic.com/api/oauth/usage` (undocumented, OAuth token from
+  `~/.claude/.credentials.json`) only when the file is missing or older than ten
+  minutes, plus once every half hour for reset times and Fable. Both are
+  server-computed truth, same numbers `/usage` shows; trust them over anything
+  derived from transcripts.
+- **Why the file comes first:** the endpoint's rate limit is per ACCOUNT and every
+  Claude Code session polls it too, so with many sessions open it answers 429 for
+  hours, and a reboot changes nothing (anthropics/claude-code #77477, #31637, #30930;
+  on-device 09/11/2026). The poller honours `retry-after` (`ritardoDopo429`; `0`
+  means nothing), base 5 min, cap 30 min. The Desktop format is internal and
+  undocumented: `letturaDesktop` drops any sample without the expected shape rather
+  than guessing, and has no reset times or Fable — `completa` carries those over
+  from an earlier endpoint reading only while they are still valid (a reset in the
+  future; Fable only from a reading under 30 min old).
 - Today/Burn Rate are computed locally from `~/.claude/projects/**/*.jsonl`
   transcripts. This only sees Claude Code activity on **this machine** — it
   undercounts relative to the account-wide gauges above if the user also

@@ -3873,6 +3873,130 @@ function focusStrategyForBundle(bundle) {
   return "app";
 }
 
+// src/consumi.js
+function pickBucket(o) {
+  if (!o || typeof o !== "object") return null;
+  let pct = null;
+  if (typeof o.utilization === "number") pct = o.utilization;
+  const resetsAt = o.resets_at ?? o.resetsAt ?? null;
+  return pct == null && !resetsAt ? null : { pct, resetsAt };
+}
+function usageDaRisposta(j) {
+  const limits = Array.isArray(j?.limits) ? j.limits : [];
+  const fromLimit = (kind) => {
+    const l = limits.find((x) => x.kind === kind);
+    return l ? { pct: l.percent, resetsAt: l.resets_at } : null;
+  };
+  const scoped = limits.find((x) => x.kind === "weekly_scoped");
+  const models = [];
+  for (const l of limits) {
+    if (l.kind !== "weekly_scoped") continue;
+    const name = l.scope?.model?.display_name;
+    if (name && typeof l.percent === "number") models.push({ name, pct: l.percent, resetsAt: l.resets_at ?? null });
+  }
+  for (const [key, name] of [["seven_day_opus", "Opus"], ["seven_day_sonnet", "Sonnet"]]) {
+    const b = pickBucket(j?.[key]);
+    if (b?.pct != null && !models.some((m) => m.name === name)) models.push({ name, pct: b.pct, resetsAt: b.resetsAt });
+  }
+  return {
+    fiveHour: pickBucket(j?.five_hour) ?? fromLimit("session"),
+    weekly: pickBucket(j?.seven_day) ?? fromLimit("weekly_all"),
+    weeklyOpus: pickBucket(j?.seven_day_opus),
+    scopedPct: scoped?.percent ?? null,
+    scopedName: scoped?.scope?.model?.display_name ?? null,
+    models
+  };
+}
+var FILE_DESKTOP = "plan-usage-history.json";
+function percorsiDesktop({ platform: platform2, env = {}, home, listDir = () => [] }) {
+  const out = [];
+  if (platform2 === "darwin") {
+    out.push(`${home}/Library/Application Support/Claude/${FILE_DESKTOP}`);
+    return out;
+  }
+  if (platform2 === "win32") {
+    const sep = "\\";
+    const roaming = env.APPDATA || `${home}${sep}AppData${sep}Roaming`;
+    const local = env.LOCALAPPDATA || `${home}${sep}AppData${sep}Local`;
+    out.push(`${roaming}${sep}Claude${sep}${FILE_DESKTOP}`);
+    const pacchetti = `${local}${sep}Packages`;
+    for (const nome of listDir(pacchetti)) {
+      if (/^Claude_/i.test(nome)) out.push(`${pacchetti}${sep}${nome}${sep}LocalCache${sep}Roaming${sep}Claude${sep}${FILE_DESKTOP}`);
+    }
+    return out;
+  }
+  out.push(`${env.XDG_CONFIG_HOME || `${home}/.config`}/Claude/${FILE_DESKTOP}`);
+  return out;
+}
+var percento = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1e3 ? v : null;
+var bucket = (v) => percento(v) == null ? null : { pct: v, resetsAt: null };
+function letturaDesktop(raw) {
+  let j;
+  try {
+    j = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch {
+    return null;
+  }
+  const samples = Array.isArray(j?.samples) ? j.samples : Array.isArray(j) ? j : [];
+  let best = null;
+  for (const s of samples) {
+    const t = typeof s?.t === "number" ? s.t : Date.parse(s?.t);
+    if (!Number.isFinite(t) || !s?.u || typeof s.u !== "object") continue;
+    if (percento(s.u.fh) == null && percento(s.u.sd) == null) continue;
+    if (!best || t > best.t) best = { t, u: s.u };
+  }
+  if (!best) return null;
+  const { u } = best;
+  const models = [];
+  if (percento(u.so) != null) models.push({ name: "Opus", pct: u.so, resetsAt: null });
+  if (percento(u.sn) != null) models.push({ name: "Sonnet", pct: u.sn, resetsAt: null });
+  return {
+    at: best.t,
+    usage: {
+      fiveHour: bucket(u.fh),
+      weekly: bucket(u.sd),
+      weeklyOpus: bucket(u.so),
+      scopedPct: null,
+      scopedName: null,
+      models
+    }
+  };
+}
+var FRESCA_MS = 30 * 6e4;
+var futuro = (iso, now) => !!iso && new Date(iso).getTime() > now;
+function completa(nuova, vecchia, vecchiaAt, now) {
+  if (!vecchia) return nuova;
+  const reset = (b, old) => b && b.resetsAt == null && futuro(old?.resetsAt, now) ? { ...b, resetsAt: old.resetsAt } : b;
+  const fresca = now - (vecchiaAt ?? 0) < FRESCA_MS;
+  const models = nuova.models.map((m) => reset(m, (vecchia.models ?? []).find((o) => o.name === m.name)));
+  if (fresca) {
+    for (const o of vecchia.models ?? []) if (!models.some((m) => m.name === o.name)) models.push(o);
+  }
+  return {
+    ...nuova,
+    fiveHour: reset(nuova.fiveHour, vecchia.fiveHour),
+    weekly: reset(nuova.weekly, vecchia.weekly),
+    weeklyOpus: reset(nuova.weeklyOpus, vecchia.weeklyOpus),
+    scopedPct: nuova.scopedPct ?? (fresca ? vecchia.scopedPct ?? null : null),
+    scopedName: nuova.scopedName ?? (fresca ? vecchia.scopedName ?? null : null),
+    models
+  };
+}
+var API_BASE_MS = 5 * 6e4;
+var API_MAX_MS = 30 * 6e4;
+var DESKTOP_BASTA_MS = 10 * 6e4;
+var API_CON_DESKTOP_MS = 30 * 6e4;
+function serveEndpoint({ now, usageAt, src, apiOkAt }) {
+  const desktopFresco = src === "desktop" && now - (usageAt ?? 0) < DESKTOP_BASTA_MS;
+  if (!desktopFresco) return true;
+  return now - (apiOkAt ?? 0) >= API_CON_DESKTOP_MS;
+}
+function ritardoDopo429(attuale, retryAfter) {
+  const ra = Number(retryAfter);
+  const dalServer = Number.isFinite(ra) && ra > 0 ? ra * 1e3 : 0;
+  return Math.min(Math.max(attuale * 2, dalServer, API_BASE_MS), API_MAX_MS);
+}
+
 // src/usage.js
 function windowStartMs(kind, now) {
   if (kind === "5h") return now - 5 * 3600 * 1e3;
@@ -5937,6 +6061,13 @@ function fmtAgo(ms) {
   const h = Math.floor(ms / 36e5), m = Math.floor(ms % 36e5 / 6e4);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
+function fmtEta(ms) {
+  return ms < 6e4 ? "just now" : `${fmtAgo(ms)} ago`;
+}
+function sottoGauge(b, usageAt, now) {
+  if (!b) return "no data";
+  return b.resetsAt ? fmtReset(b.resetsAt, now) : fmtEta(now - (usageAt ?? now));
+}
 var GAUGE_WINDOW = { "usage-session": "5h", "usage-weekly": "7day", "usage-model": "7day" };
 function gaugeMode(state2, kind, now) {
   const win = GAUGE_WINDOW[kind];
@@ -6016,7 +6147,7 @@ function viewFor(kind, env) {
       if (mode === "local") return img(localGauge("LAST 5H", state2.usageMeter?.["5h"], settings.budget, usageViewMode, animPhase2));
       if (mode !== "subscription") return img(gaugeKey("SESSION 5H", null, mode === "throttled" ? "throttled" : mode === "error" ? "sign in?" : "no data"));
       const b = state2.usage?.fiveHour;
-      return img(gaugeKey("SESSION 5H", b?.pct ?? null, b ? fmtReset(b.resetsAt, now) : "no data", b?.pct >= 90 ? animPhase2 : null));
+      return img(gaugeKey("SESSION 5H", b?.pct ?? null, sottoGauge(b, state2.usageAt, now), b?.pct >= 90 ? animPhase2 : null));
     }
     case "usage-weekly": {
       const mode = gaugeMode(state2, "usage-weekly", now);
@@ -6024,7 +6155,7 @@ function viewFor(kind, env) {
       if (mode !== "subscription") return img(gaugeKey("WEEKLY", null, mode === "throttled" ? "throttled" : mode === "error" ? "sign in?" : "no data"));
       const b = state2.usage?.weekly;
       const u = state2.usage;
-      const sub = u?.scopedPct != null && u.scopedName ? `${u.scopedName} ${Math.round(u.scopedPct)}%` : u?.weeklyOpus?.pct != null ? `opus ${Math.round(u.weeklyOpus.pct)}%` : b ? fmtReset(b.resetsAt, now) : "no data";
+      const sub = u?.scopedPct != null && u.scopedName ? `${u.scopedName} ${Math.round(u.scopedPct)}%` : u?.weeklyOpus?.pct != null ? `opus ${Math.round(u.weeklyOpus.pct)}%` : sottoGauge(b, state2.usageAt, now);
       return img(gaugeKey("WEEKLY", b?.pct ?? null, sub, b?.pct >= 90 ? animPhase2 : null));
     }
     case "usage-model": {
@@ -6042,7 +6173,7 @@ function viewFor(kind, env) {
       if (mmode === "local") {
         return img(localGauge(head_ + more, pick, settings.budget, usageViewMode, animPhase2));
       }
-      return img(gaugeKey(head_ + more, pick.pct ?? null, pick.resetsAt ? fmtReset(pick.resetsAt, now) : "no data", pick.pct >= 90 ? animPhase2 : null));
+      return img(gaugeKey(head_ + more, pick.pct ?? null, sottoGauge(pick, state2.usageAt, now), pick.pct >= 90 ? animPhase2 : null));
     }
     case "burn-rate":
       return img(burnKey(state2.burn?.tokensHour ?? null, sessionEta(state2, now)));
@@ -6288,6 +6419,10 @@ var state = {
   usageMeterModels: null,
   // [{model,tokens,cost}] over 7d, for the model key in local mode
   usageAt: 0,
+  usageSrc: null,
+  // "desktop" | "api": da dove viene state.usage (src/consumi.js)
+  apiOkAt: 0,
+  // l'ultima risposta buona dell'endpoint
   sessions: [],
   today: null,
   burn: null,
@@ -6322,14 +6457,7 @@ var state = {
   globalSettings: {},
   pluginUUID: null
 };
-function pickBucket(o) {
-  if (!o || typeof o !== "object") return null;
-  let pct = null;
-  if (typeof o.utilization === "number") pct = o.utilization;
-  const resetsAt = o.resets_at ?? o.resetsAt ?? null;
-  return pct == null && !resetsAt ? null : { pct, resetsAt };
-}
-var USAGE_DELAY_BASE = 12e4;
+var USAGE_DELAY_BASE = API_BASE_MS;
 var usageDelay = USAGE_DELAY_BASE;
 var lastUsageAttempt = 0;
 var CACHE_FILE = path3.join(os.tmpdir(), "agent-vitals-usage-cache.json");
@@ -6338,10 +6466,68 @@ try {
   if (Date.now() - c.at < 30 * 6e4) {
     state.usage = c.usage;
     state.usageAt = c.at;
+    state.usageSrc = c.src ?? "api";
+    if (state.usageSrc === "api") state.apiOkAt = c.at;
   }
 } catch {
 }
-async function pollUsage() {
+function adottaConsumi(usage, at, src) {
+  if (src !== "api" && at <= state.usageAt) return false;
+  if (src !== state.usageSrc) log(`usage source: ${src} (sample ${Math.round((Date.now() - at) / 6e4)}m old)`);
+  state.usage = src === "desktop" ? completa(usage, state.usage, state.usageAt, Date.now()) : usage;
+  state.usageAt = at;
+  state.usageSrc = src;
+  const fp5 = state.usage.fiveHour?.pct;
+  if (typeof fp5 === "number") {
+    state.pctHistory.push({ t: at, pct: fp5 });
+    state.pctHistory = state.pctHistory.filter((h) => at - h.t < 36e5);
+  }
+  try {
+    fs.writeFileSync(CACHE_FILE, JSON.stringify({ usage: state.usage, at, src }));
+  } catch {
+  }
+  scheduleResetPoll();
+  renderAll(["usage-session", "usage-weekly", "usage-model", "burn-rate"]);
+  return true;
+}
+var desktopSeen = /* @__PURE__ */ new Map();
+var desktopTrovato = null;
+async function pollDesktopUsage() {
+  const candidati = percorsiDesktop({
+    platform: process.platform,
+    env: process.env,
+    home: os.homedir(),
+    listDir: (d) => {
+      try {
+        return fs.readdirSync(d);
+      } catch {
+        return [];
+      }
+    }
+  });
+  let best = null, bestPath = null;
+  for (const fp of candidati) {
+    try {
+      const { mtimeMs } = await fsp.stat(fp);
+      if (desktopSeen.get(fp) === mtimeMs) continue;
+      desktopSeen.set(fp, mtimeMs);
+      const l = letturaDesktop(await fsp.readFile(fp, "utf8"));
+      if (l && (!best || l.at > best.at)) {
+        best = l;
+        bestPath = fp;
+      }
+    } catch {
+    }
+  }
+  if (!best) return;
+  if (bestPath !== desktopTrovato) {
+    desktopTrovato = bestPath;
+    log("usage: Claude Desktop history at", bestPath);
+  }
+  adottaConsumi(best.usage, best.at, "desktop");
+}
+async function pollUsage({ forza = false } = {}) {
+  if (!forza && !serveEndpoint({ now: Date.now(), usageAt: state.usageAt, src: state.usageSrc, apiOkAt: state.apiOkAt })) return;
   lastUsageAttempt = Date.now();
   try {
     const token = await platform.readToken();
@@ -6354,7 +6540,7 @@ async function pollUsage() {
       }
     });
     if (res.status === 429) {
-      usageDelay = Math.min(usageDelay * 2, 9e5);
+      usageDelay = ritardoDopo429(usageDelay, res.headers.get("retry-after"));
       throw new Error(`usage endpoint HTTP 429 (backing off to ${usageDelay / 1e3}s)`);
     }
     if (!res.ok) throw new Error(`usage endpoint HTTP ${res.status}`);
@@ -6364,42 +6550,9 @@ async function pollUsage() {
       state.loggedRaw = true;
       log("usage raw shape:", JSON.stringify(j).slice(0, 1200));
     }
-    const limits = Array.isArray(j.limits) ? j.limits : [];
-    const fromLimit = (kind) => {
-      const l = limits.find((x) => x.kind === kind);
-      return l ? { pct: l.percent, resetsAt: l.resets_at } : null;
-    };
-    const scoped = limits.find((x) => x.kind === "weekly_scoped");
-    const models = [];
-    for (const l of limits) {
-      if (l.kind !== "weekly_scoped") continue;
-      const name = l.scope?.model?.display_name;
-      if (name && typeof l.percent === "number") models.push({ name, pct: l.percent, resetsAt: l.resets_at ?? null });
-    }
-    for (const [key, name] of [["seven_day_opus", "Opus"], ["seven_day_sonnet", "Sonnet"]]) {
-      const b = pickBucket(j[key]);
-      if (b?.pct != null && !models.some((m) => m.name === name)) models.push({ name, pct: b.pct, resetsAt: b.resetsAt });
-    }
-    state.usage = {
-      fiveHour: pickBucket(j.five_hour) ?? fromLimit("session"),
-      weekly: pickBucket(j.seven_day) ?? fromLimit("weekly_all"),
-      weeklyOpus: pickBucket(j.seven_day_opus),
-      scopedPct: scoped?.percent ?? null,
-      scopedName: scoped?.scope?.model?.display_name ?? null,
-      models
-    };
     state.usageErr = null;
-    state.usageAt = Date.now();
-    const fp5 = state.usage.fiveHour?.pct;
-    if (typeof fp5 === "number") {
-      state.pctHistory.push({ t: state.usageAt, pct: fp5 });
-      state.pctHistory = state.pctHistory.filter((h) => state.usageAt - h.t < 36e5);
-    }
-    try {
-      fs.writeFileSync(CACHE_FILE, JSON.stringify({ usage: state.usage, at: state.usageAt }));
-    } catch {
-    }
-    scheduleResetPoll();
+    state.apiOkAt = Date.now();
+    adottaConsumi(usageDaRisposta(j), state.apiOkAt, "api");
   } catch (e) {
     state.usageErr = String(e.message ?? e);
     log("usage poll failed:", state.usageErr);
@@ -6412,7 +6565,7 @@ function scheduleResetPoll() {
   const deltas = [state.usage?.fiveHour?.resetsAt, state.usage?.weekly?.resetsAt].filter(Boolean).map((iso) => new Date(iso).getTime() - Date.now()).filter((d) => d > 0 && d < 6 * 36e5);
   if (!deltas.length) return;
   clearTimeout(resetTimer);
-  resetTimer = setTimeout(pollUsage, Math.min(...deltas) + 8e3);
+  resetTimer = setTimeout(() => pollUsage({ forza: true }), Math.min(...deltas) + 8e3);
 }
 var transcriptDirFor = /* @__PURE__ */ new Map();
 async function transcriptMtime(s) {
@@ -7246,6 +7399,7 @@ function onKeyDown(context, kind) {
         pollUsageMeter();
         return render(context, kind);
       }
+      pollDesktopUsage();
       if (Date.now() - lastUsageAttempt > 3e4) pollUsage();
       return;
     case "today":
@@ -7660,9 +7814,13 @@ async function pollTheCore(forza = false) {
 }
 if (process.argv.includes("--selftest")) {
   (async () => {
-    log("selftest: polling usage\u2026");
-    await pollUsage();
-    log("selftest usage:", state.usage ? JSON.stringify(state.usage) : `ERROR: ${state.usageErr}`);
+    log("selftest: reading Claude Desktop usage history\u2026");
+    await pollDesktopUsage();
+    log("selftest desktop:", desktopTrovato ? `${desktopTrovato} (sample ${Math.round((Date.now() - state.usageAt) / 6e4)}m old)` : "not found");
+    log("selftest: polling usage endpoint\u2026");
+    await pollUsage({ forza: true });
+    log("selftest usage:", state.usage ? `${state.usageSrc} ${JSON.stringify(state.usage)}` : `ERROR: ${state.usageErr}`);
+    if (state.usageErr) log("selftest endpoint:", state.usageErr);
     await pollSessions();
     log("selftest sessions:", state.sessions.map((s) => `${s.name}[${s.status}]`).join(", ") || "(none)");
     log("selftest states:", state.sessions.map((s) => `${s.name}=${sessionState(s, Date.now(), state.activity.get(s.sessionId) ?? null)}${s.waitingFor ? "(" + s.waitingFor + ")" : ""}`).join(", ") || "(none)");
@@ -7731,7 +7889,9 @@ if (process.argv.includes("--selftest")) {
     send({ event: registerEvent, uuid: pluginUUID });
     log("registered with Stream Deck");
     send({ event: "getGlobalSettings", context: pluginUUID });
-    if (Date.now() - state.usageAt > 9e4) pollUsage();
+    pollDesktopUsage().finally(() => {
+      if (Date.now() - state.usageAt > 9e4) pollUsage();
+    });
     pollSessions();
     pollToday();
   });
@@ -7837,6 +7997,7 @@ if (process.argv.includes("--selftest")) {
       usageLoop();
     }, usageDelay);
   })();
+  setInterval(pollDesktopUsage, 6e4);
   setInterval(pollSessions, 5e3);
   setInterval(pollToday, 3e5);
   pollBurn();

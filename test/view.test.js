@@ -596,3 +596,15 @@ test("scelta multipla: caselle ai lati, CONFERMA al centro, e la faccia disegnat
   assert.match(drawn("approve-always", { state: spuntata }), /1 scelta/);
   assert.notEqual(viewFor("approve-allow", { state: vuota, now: NOW }).painted.faccia, viewFor("approve-allow", { state: spuntata, now: NOW }).painted.faccia);
 });
+
+test("un numero senza ora di reset (dal file di Claude Desktop) dice da quanto è stato letto", () => {
+  const state = {
+    ...emptyState(), usageAt: NOW - 4 * 60_000, usageSrc: "desktop",
+    usage: { fiveHour: { pct: 64, resetsAt: null }, weekly: { pct: 29, resetsAt: null }, models: [{ name: "Opus", pct: 12, resetsAt: null }] },
+  };
+  assert.match(drawn("usage-session", { state }), /64/);
+  assert.match(drawn("usage-session", { state }), /4m ago/);
+  assert.match(drawn("usage-weekly", { state }), /4m ago/);
+  assert.match(drawn("usage-model", { state }), /4m ago/);
+  assert.match(drawn("usage-session", { state: { ...state, usageAt: NOW - 20_000 } }), /just now/);
+});

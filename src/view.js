@@ -53,6 +53,17 @@ export function fmtAgo(ms) {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+// Il sottotitolo di un tasto dei consumi: l'ora del reset quando la si sa, se no da
+// quanto è stato letto il numero. Il file di Claude Desktop (src/consumi.js) non porta
+// l'ora di reset, e un sottotitolo vuoto non direbbe se il numero è di adesso.
+export function fmtEta(ms) {
+  return ms < 60_000 ? "just now" : `${fmtAgo(ms)} ago`;
+}
+function sottoGauge(b, usageAt, now) {
+  if (!b) return "no data";
+  return b.resetsAt ? fmtReset(b.resetsAt, now) : fmtEta(now - (usageAt ?? now));
+}
+
 // ---------- gauge sourcing ----------
 // Which local window each gauge key needs when it falls back.
 export const GAUGE_WINDOW = { "usage-session": "5h", "usage-weekly": "7day", "usage-model": "7day" };
@@ -180,7 +191,7 @@ export function viewFor(kind, env) {
       if (mode === "local") return img(localGauge("LAST 5H", state.usageMeter?.["5h"], settings.budget, usageViewMode, animPhase));
       if (mode !== "subscription") return img(gaugeKey("SESSION 5H", null, mode === "throttled" ? "throttled" : mode === "error" ? "sign in?" : "no data"));
       const b = state.usage?.fiveHour;
-      return img(gaugeKey("SESSION 5H", b?.pct ?? null, b ? fmtReset(b.resetsAt, now) : "no data", b?.pct >= 90 ? animPhase : null));
+      return img(gaugeKey("SESSION 5H", b?.pct ?? null, sottoGauge(b, state.usageAt, now), b?.pct >= 90 ? animPhase : null));
     }
     case "usage-weekly": {
       const mode = gaugeMode(state, "usage-weekly", now);
@@ -191,7 +202,7 @@ export function viewFor(kind, env) {
       const sub = u?.scopedPct != null && u.scopedName
         ? `${u.scopedName} ${Math.round(u.scopedPct)}%`
         : u?.weeklyOpus?.pct != null ? `opus ${Math.round(u.weeklyOpus.pct)}%`
-        : b ? fmtReset(b.resetsAt, now) : "no data";
+        : sottoGauge(b, state.usageAt, now);
       return img(gaugeKey("WEEKLY", b?.pct ?? null, sub, b?.pct >= 90 ? animPhase : null));
     }
     case "usage-model": {
@@ -209,7 +220,7 @@ export function viewFor(kind, env) {
       if (mmode === "local") {
         return img(localGauge(head_ + more, pick, settings.budget, usageViewMode, animPhase));
       }
-      return img(gaugeKey(head_ + more, pick.pct ?? null, pick.resetsAt ? fmtReset(pick.resetsAt, now) : "no data", pick.pct >= 90 ? animPhase : null));
+      return img(gaugeKey(head_ + more, pick.pct ?? null, sottoGauge(pick, state.usageAt, now), pick.pct >= 90 ? animPhase : null));
     }
     case "burn-rate":
       return img(burnKey(state.burn?.tokensHour ?? null, sessionEta(state, now)));
