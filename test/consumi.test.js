@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   usageDaRisposta, percorsiDesktop, letturaDesktop, formaDesktop, completa, cinqueOre, serveEndpoint, ritardoDopo429,
+  letturaStatusline, rigaStatusline, statuslineFragment, finestraValida, SETTE_GIORNI_MS,
   API_BASE_MS, API_MAX_MS, FRESCA_MS,
 } from "../src/consumi.js";
 import { gaugeSource } from "../src/usage.js";
@@ -190,4 +191,74 @@ test("la risposta dell'endpoint nella forma con i soli limits", () => {
   ] });
   assert.deepEqual(u.fiveHour, { pct: 22, resetsAt: "a" });
   assert.deepEqual(u.weekly, { pct: 41, resetsAt: "b" });
+});
+
+// ---------- la barra di stato di Claude Code ----------
+// La forma documentata (code.claude.com/docs/en/statusline) e vista in un payload vero
+// (anthropics/claude-code #92081): percento 0–100, resets_at in secondi.
+const payloadBarra = (rl) => ({
+  model: { id: "claude-opus-5-5", display_name: "Opus 5.5" },
+  workspace: { current_dir: "C:\\Users\\malac\\Documents\\GitHub\\thecore-v2" },
+  ...(rl === undefined ? {} : { rate_limits: rl }),
+});
+
+test("barra di stato: le due finestre, con l'ora di reset dai secondi", () => {
+  const l = letturaStatusline(payloadBarra({
+    five_hour: { used_percentage: 23.5, resets_at: 1794240000 },
+    seven_day: { used_percentage: 41, resets_at: 1794603600 },
+  }), NOW);
+  assert.equal(l.at, NOW);
+  assert.deepEqual(l.usage.fiveHour, { pct: 23.5, resetsAt: "2026-11-09T16:00:00.000Z" });
+  assert.equal(l.usage.weekly.pct, 41);
+  assert.equal(l.usage.weekly.resetsAt, new Date(1794603600 * 1000).toISOString());
+});
+
+test("barra di stato: una finestra che manca non è uno zero, e senza rate_limits non c'è lettura", () => {
+  const l = letturaStatusline(payloadBarra({ seven_day: { used_percentage: 47, resets_at: 1788606000 } }), NOW);
+  assert.equal(l.usage.fiveHour, null);
+  assert.equal(l.usage.weekly.pct, 47);
+  assert.equal(letturaStatusline(payloadBarra(undefined), NOW), null);  // non abbonamento, o versione vecchia
+  assert.equal(letturaStatusline(payloadBarra({}), NOW), null);
+  assert.equal(letturaStatusline(payloadBarra({ five_hour: { used_percentage: "23" } }), NOW), null);
+  assert.equal(letturaStatusline(null, NOW), null);
+});
+
+test("barra di stato: la riga che mostra", () => {
+  assert.equal(rigaStatusline(payloadBarra({
+    five_hour: { used_percentage: 23.5, resets_at: 1 }, seven_day: { used_percentage: 41, resets_at: 1 },
+  })), "Opus 5.5 · thecore-v2 · 5h 24% · 7d 41%");
+  assert.equal(rigaStatusline(payloadBarra(undefined)), "Opus 5.5 · thecore-v2");
+  assert.equal(rigaStatusline({ cwd: "/Users/e/web-app/" }), "web-app");
+  assert.equal(rigaStatusline({}), "");
+});
+
+test("barra di stato: il pezzo da incollare è JSON valido, con curl.exe su Windows", () => {
+  const url = "http://127.0.0.1:47823/statusline/abc";
+  const win = JSON.parse(`{${statuslineFragment(url, { windows: true })}}`).statusLine;
+  assert.equal(win.type, "command");
+  assert.equal(win.command, 'curl.exe -s -m 2 --data-binary "@-" http://127.0.0.1:47823/statusline/abc');
+  const mac = JSON.parse(`{${statuslineFragment(url)}}`).statusLine;
+  assert.match(mac.command, /^curl -s /);
+});
+
+test("barra di stato: una finestra che manca si prende dalla lettura di prima solo se fresca e non ripartita", () => {
+  const nuova = letturaStatusline(payloadBarra({ seven_day: { used_percentage: 12, resets_at: 1794603600 } }), NOW).usage;
+  const prima = { fiveHour: { pct: 5, resetsAt: iso(NOW + 3.6e6) }, weekly: { pct: 11, resetsAt: iso(NOW + 9e7) }, models: [] };
+  assert.equal(completa(nuova, prima, NOW - 60_000, NOW).fiveHour.pct, 5);
+  assert.equal(completa(nuova, prima, NOW - FRESCA_MS - 1, NOW).fiveHour, null);            // vecchia
+  const ripartita = { ...prima, fiveHour: { pct: 5, resetsAt: iso(NOW - 1) } };
+  assert.equal(completa(nuova, ripartita, NOW - 60_000, NOW).fiveHour, null);               // finestra chiusa
+  assert.equal(completa(nuova, prima, NOW - 60_000, NOW).weekly.pct, 12);                    // il nuovo vince
+});
+
+test("una finestra locale già ripartita non si mostra; dall'endpoint sì", () => {
+  const b = { pct: 80, resetsAt: iso(NOW - 60_000) };
+  assert.equal(finestraValida(b, "statusline", NOW - 2 * 3.6e6, NOW, SETTE_GIORNI_MS), null);
+  assert.equal(finestraValida(b, "api", NOW - 60_000, NOW, SETTE_GIORNI_MS), b);
+  assert.equal(finestraValida({ pct: 80, resetsAt: iso(NOW + 60_000) }, "statusline", NOW - 2 * 3.6e6, NOW, SETTE_GIORNI_MS).pct, 80);
+});
+
+test("con la barra di stato fresca l'endpoint resta fermo", () => {
+  assert.equal(serveEndpoint({ now: NOW, usageAt: NOW - 30_000, src: "statusline", apiOkAt: NOW - 60_000 }), false);
+  assert.equal(serveEndpoint({ now: NOW, usageAt: NOW - 11 * 60_000, src: "statusline", apiOkAt: NOW - 60_000 }), true);
 });

@@ -206,3 +206,32 @@ test("EADDRINUSE rejects after exhausting retries", { timeout: 5000 }, async () 
   );
   await first.h.close();
 });
+
+// ---------- la barra di stato (src/consumi.js) ----------
+test("la barra di stato: stesso segreto, risposta subito in testo, niente coda", { timeout: 5000 }, async () => {
+  const visti = [];
+  const { h, seen, url } = await boot({ onStatusline: (p) => { visti.push(p); return "Opus 5.5 · 5h 23%"; } });
+  const res = await post(url(`/statusline/${SECRET}`), { rate_limits: { five_hour: { used_percentage: 23 } } });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type"), /text\/plain/);
+  assert.equal(await res.text(), "Opus 5.5 · 5h 23%");
+  assert.equal(visti[0].rate_limits.five_hour.used_percentage, 23);
+  assert.equal(seen.length, 0, "una barra di stato non è una richiesta di permesso");
+  // Senza il segreto giusto: 404, come gli hook.
+  assert.equal((await post(url(`/statusline/${"x".repeat(32)}`), {})).status, 404);
+  await h.close();
+});
+
+test("la barra di stato: un callback che si rompe dà una riga vuota, non un errore", { timeout: 5000 }, async () => {
+  const { h, url } = await boot({ onStatusline: () => { throw new Error("boom"); } });
+  const res = await post(url(`/statusline/${SECRET}`), {});
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), "");
+  await h.close();
+});
+
+test("senza onStatusline la strada della barra di stato non esiste", { timeout: 5000 }, async () => {
+  const { h, url } = await boot();
+  assert.equal((await post(url(`/statusline/${SECRET}`), {})).status, 404);
+  await h.close();
+});

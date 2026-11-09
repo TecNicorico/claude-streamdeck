@@ -3977,29 +3977,64 @@ function formaDesktop(raw) {
   const ultimo = samples[samples.length - 1];
   return `${samples.length} samples, last {${chiavi(ultimo)}}, u {${chiavi(ultimo?.u)}}`;
 }
-var CINQUE_ORE_MS = 5 * 36e5;
-function cinqueOre(usage, src, at, now) {
-  const b = usage?.fiveHour ?? null;
-  if (!b || src !== "desktop" || b.resetsAt) return b;
-  return now - (at ?? 0) >= CINQUE_ORE_MS ? null : b;
+var istante = (v) => {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return new Date(n < 1e12 ? n * 1e3 : n).toISOString();
+};
+function letturaStatusline(payload, now) {
+  const rl = payload?.rate_limits;
+  if (!rl || typeof rl !== "object") return null;
+  const fin = (w) => percento(w?.used_percentage) == null ? null : { pct: w.used_percentage, resetsAt: istante(w.resets_at) };
+  const fiveHour = fin(rl.five_hour), weekly = fin(rl.seven_day);
+  if (!fiveHour && !weekly) return null;
+  return { at: now, usage: { fiveHour, weekly, weeklyOpus: null, scopedPct: null, scopedName: null, models: [] } };
 }
+function rigaStatusline(payload) {
+  const parti2 = [];
+  const modello = payload?.model?.display_name;
+  if (typeof modello === "string" && modello) parti2.push(modello);
+  const dir = payload?.workspace?.current_dir ?? payload?.cwd;
+  if (typeof dir === "string" && dir) parti2.push(dir.split(/[\\/]/).filter(Boolean).pop() ?? dir);
+  const rl = payload?.rate_limits;
+  const p = (w) => percento(w?.used_percentage) == null ? null : Math.round(w.used_percentage);
+  if (p(rl?.five_hour) != null) parti2.push(`5h ${p(rl.five_hour)}%`);
+  if (p(rl?.seven_day) != null) parti2.push(`7d ${p(rl.seven_day)}%`);
+  return parti2.join(" \xB7 ");
+}
+function statuslineFragment(url, { windows = false } = {}) {
+  const command = `${windows ? "curl.exe" : "curl"} -s -m 2 --data-binary "@-" ${url}`;
+  return ['"statusLine": {', '  "type": "command",', `  "command": ${JSON.stringify(command)}`, "}"].join("\n");
+}
+var CINQUE_ORE_MS = 5 * 36e5;
+var SETTE_GIORNI_MS = 7 * 24 * 36e5;
+var daEndpoint = (src) => !src || src === "api";
+function finestraValida(b, src, at, now, durataMs) {
+  if (!b || daEndpoint(src)) return b ?? null;
+  if (b.resetsAt) return new Date(b.resetsAt).getTime() > now ? b : null;
+  return now - (at ?? 0) < durataMs ? b : null;
+}
+var cinqueOre = (usage, src, at, now) => finestraValida(usage?.fiveHour ?? null, src, at, now, CINQUE_ORE_MS);
 var FRESCA_MS = 30 * 6e4;
 var futuro = (iso, now) => !!iso && new Date(iso).getTime() > now;
-function completa(nuova, vecchia, vecchiaAt, now) {
-  if (!vecchia) return nuova;
-  const reset = (b, old) => b && b.resetsAt == null && futuro(old?.resetsAt, now) ? { ...b, resetsAt: old.resetsAt } : b;
+function completa(nuova, vecchia2, vecchiaAt, now) {
+  if (!vecchia2) return nuova;
   const fresca = now - (vecchiaAt ?? 0) < FRESCA_MS;
-  const models = nuova.models.map((m) => reset(m, (vecchia.models ?? []).find((o) => o.name === m.name)));
+  const unisci = (b, old) => {
+    if (!b) return fresca && old && (!old.resetsAt || futuro(old.resetsAt, now)) ? old : null;
+    return b.resetsAt == null && futuro(old?.resetsAt, now) ? { ...b, resetsAt: old.resetsAt } : b;
+  };
+  const models = nuova.models.map((m) => unisci(m, (vecchia2.models ?? []).find((o) => o.name === m.name)));
   if (fresca) {
-    for (const o of vecchia.models ?? []) if (!models.some((m) => m.name === o.name)) models.push(o);
+    for (const o of vecchia2.models ?? []) if (!models.some((m) => m.name === o.name)) models.push(o);
   }
   return {
     ...nuova,
-    fiveHour: reset(nuova.fiveHour, vecchia.fiveHour),
-    weekly: reset(nuova.weekly, vecchia.weekly),
-    weeklyOpus: reset(nuova.weeklyOpus, vecchia.weeklyOpus),
-    scopedPct: nuova.scopedPct ?? (fresca ? vecchia.scopedPct ?? null : null),
-    scopedName: nuova.scopedName ?? (fresca ? vecchia.scopedName ?? null : null),
+    fiveHour: unisci(nuova.fiveHour, vecchia2.fiveHour),
+    weekly: unisci(nuova.weekly, vecchia2.weekly),
+    weeklyOpus: unisci(nuova.weeklyOpus, vecchia2.weeklyOpus),
+    scopedPct: nuova.scopedPct ?? (fresca ? vecchia2.scopedPct ?? null : null),
+    scopedName: nuova.scopedName ?? (fresca ? vecchia2.scopedName ?? null : null),
     models
   };
 }
@@ -4008,8 +4043,8 @@ var API_MAX_MS = 30 * 6e4;
 var DESKTOP_BASTA_MS = 10 * 6e4;
 var API_CON_DESKTOP_MS = 30 * 6e4;
 function serveEndpoint({ now, usageAt, src, apiOkAt }) {
-  const desktopFresco = src === "desktop" && now - (usageAt ?? 0) < DESKTOP_BASTA_MS;
-  if (!desktopFresco) return true;
+  const localeFresca = !daEndpoint(src) && now - (usageAt ?? 0) < DESKTOP_BASTA_MS;
+  if (!localeFresca) return true;
   return now - (apiOkAt ?? 0) >= API_CON_DESKTOP_MS;
 }
 function ritardoDopo429(attuale, retryAfter) {
@@ -4191,7 +4226,7 @@ function hasSubscriptionData(usage) {
 }
 function gaugeSource({ usage, usageErr, usageAt, usageSrc = null, now }, hasLocal = false) {
   if (usage == null && !usageErr) return "pending";
-  const validit\u00E0 = usageSrc === "desktop" ? DESKTOP_FRESH_MS : USAGE_FRESH_MS;
+  const validit\u00E0 = usageSrc === "desktop" || usageSrc === "statusline" ? DESKTOP_FRESH_MS : USAGE_FRESH_MS;
   const fresh = hasSubscriptionData(usage) && now - (usageAt ?? 0) < validit\u00E0;
   if (fresh) return "subscription";
   if (usageErr && String(usageErr).includes("429")) return "throttled";
@@ -5138,19 +5173,21 @@ var sameSecret = (a, b) => {
   const A = Buffer.from(String(a)), B = Buffer.from(String(b));
   return A.length === B.length && timingSafeEqual(A, B);
 };
-function startHookServer({ port, secret, onRequest, onDrop, log: log2 = () => {
+function startHookServer({ port, secret, onRequest, onDrop, onStatusline: onStatusline2 = null, log: log2 = () => {
 }, retries = 3, retryMs = 500 }) {
   if (!secret || String(secret).length < 32) {
     return Promise.reject(new Error("hook secret too short"));
   }
   const wantPath = `/permission/${secret}`;
+  const statusPath = `/statusline/${secret}`;
   const stats = { badPathHits: [] };
   let boundPort = null;
   const server = createServer((req, res) => {
     const deny = (code) => {
       res.writeHead(code).end();
     };
-    if (!sameSecret(req.url ?? "", wantPath)) {
+    const statusline = !!onStatusline2 && sameSecret(req.url ?? "", statusPath);
+    if (!statusline && !sameSecret(req.url ?? "", wantPath)) {
       const now = Date.now();
       stats.badPathHits.push(now);
       stats.badPathHits = stats.badPathHits.filter((t) => now - t < BADPATH_WINDOW_MS);
@@ -5179,6 +5216,16 @@ function startHookServer({ port, secret, onRequest, onDrop, log: log2 = () => {
         payload = JSON.parse(body || "{}");
       } catch {
         return deny(400);
+      }
+      if (statusline) {
+        let riga = "";
+        try {
+          riga = String(onStatusline2(payload) ?? "");
+        } catch (e) {
+          log2("statusline threw:", String(e));
+        }
+        res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        return res.end(riga);
       }
       const ticket = {
         id: null,
@@ -6087,9 +6134,15 @@ function fmtAgo(ms) {
 function fmtEta(ms) {
   return ms < 6e4 ? "just now" : `${fmtAgo(ms)} ago`;
 }
-function sottoGauge(b, usageAt, now) {
+var ETA_PRIMA_MS = 10 * 6e4;
+function vecchia(state2, now) {
+  return !daEndpoint(state2.usageSrc) && now - (state2.usageAt ?? now) >= ETA_PRIMA_MS;
+}
+function sottoGauge(b, state2, now) {
   if (!b) return "no data";
-  return b.resetsAt ? fmtReset(b.resetsAt, now) : fmtEta(now - (usageAt ?? now));
+  const eta = now - (state2.usageAt ?? now);
+  if (vecchia(state2, now)) return fmtEta(eta);
+  return b.resetsAt ? fmtReset(b.resetsAt, now) : fmtEta(eta);
 }
 var GAUGE_WINDOW = { "usage-session": "5h", "usage-weekly": "7day", "usage-model": "7day" };
 function gaugeMode(state2, kind, now) {
@@ -6170,15 +6223,15 @@ function viewFor(kind, env) {
       if (mode === "local") return img(localGauge("LAST 5H", state2.usageMeter?.["5h"], settings.budget, usageViewMode, animPhase2));
       if (mode !== "subscription") return img(gaugeKey("SESSION 5H", null, mode === "throttled" ? "throttled" : mode === "error" ? "sign in?" : "no data"));
       const b = cinqueOre(state2.usage, state2.usageSrc, state2.usageAt, now);
-      return img(gaugeKey("SESSION 5H", b?.pct ?? null, sottoGauge(b, state2.usageAt, now), b?.pct >= 90 ? animPhase2 : null));
+      return img(gaugeKey("SESSION 5H", b?.pct ?? null, sottoGauge(b, state2, now), b?.pct >= 90 ? animPhase2 : null));
     }
     case "usage-weekly": {
       const mode = gaugeMode(state2, "usage-weekly", now);
       if (mode === "local") return img(localGauge("LAST 7D", state2.usageMeter?.["7day"], settings.budget, usageViewMode, animPhase2));
       if (mode !== "subscription") return img(gaugeKey("WEEKLY", null, mode === "throttled" ? "throttled" : mode === "error" ? "sign in?" : "no data"));
-      const b = state2.usage?.weekly;
+      const b = finestraValida(state2.usage?.weekly ?? null, state2.usageSrc, state2.usageAt, now, SETTE_GIORNI_MS);
       const u = state2.usage;
-      const sub = u?.scopedPct != null && u.scopedName ? `${u.scopedName} ${Math.round(u.scopedPct)}%` : u?.weeklyOpus?.pct != null ? `opus ${Math.round(u.weeklyOpus.pct)}%` : sottoGauge(b, state2.usageAt, now);
+      const sub = !b || vecchia(state2, now) ? sottoGauge(b, state2, now) : u?.scopedPct != null && u.scopedName ? `${u.scopedName} ${Math.round(u.scopedPct)}%` : u?.weeklyOpus?.pct != null ? `opus ${Math.round(u.weeklyOpus.pct)}%` : sottoGauge(b, state2, now);
       return img(gaugeKey("WEEKLY", b?.pct ?? null, sub, b?.pct >= 90 ? animPhase2 : null));
     }
     case "usage-model": {
@@ -6196,7 +6249,8 @@ function viewFor(kind, env) {
       if (mmode === "local") {
         return img(localGauge(head_ + more, pick, settings.budget, usageViewMode, animPhase2));
       }
-      return img(gaugeKey(head_ + more, pick.pct ?? null, sottoGauge(pick, state2.usageAt, now), pick.pct >= 90 ? animPhase2 : null));
+      const valido = finestraValida(pick, state2.usageSrc, state2.usageAt, now, SETTE_GIORNI_MS);
+      return img(gaugeKey(head_ + more, valido?.pct ?? null, sottoGauge(valido, state2, now), valido?.pct >= 90 ? animPhase2 : null));
     }
     case "burn-rate":
       return img(burnKey(state2.burn?.tokensHour ?? null, sessionEta(state2, now)));
@@ -6498,7 +6552,7 @@ try {
 function adottaConsumi(usage, at, src) {
   if (src !== "api" && at <= state.usageAt) return false;
   if (src !== state.usageSrc) log(`usage source: ${src} (sample ${Math.round((Date.now() - at) / 6e4)}m old)`);
-  state.usage = src === "desktop" ? completa(usage, state.usage, state.usageAt, Date.now()) : usage;
+  state.usage = src !== "api" ? completa(usage, state.usage, state.usageAt, Date.now()) : usage;
   state.usageAt = at;
   state.usageSrc = src;
   const fp5 = state.usage.fiveHour?.pct;
@@ -6551,6 +6605,20 @@ async function pollDesktopUsage() {
     log("usage: Claude Desktop history at", bestPath);
   }
   adottaConsumi(best.usage, best.at, "desktop");
+}
+var statuslineAt = 0;
+function onStatusline(payload) {
+  const now = Date.now();
+  const l = letturaStatusline(payload, now);
+  if (l) {
+    const u = state.usage;
+    const uguale = state.usageSrc === "statusline" && u?.fiveHour?.pct === l.usage.fiveHour?.pct && u?.weekly?.pct === l.usage.weekly?.pct;
+    if (!uguale || now - statuslineAt >= 6e4) {
+      statuslineAt = now;
+      adottaConsumi(l.usage, l.at, "statusline");
+    }
+  }
+  return rigaStatusline(payload);
 }
 async function pollUsage({ forza = false } = {}) {
   if (Date.now() < apiFermaFino) return;
@@ -6859,6 +6927,7 @@ async function ensureHookServerOnce() {
       secret,
       onRequest: onHookRequest,
       onDrop: onHookDrop,
+      onStatusline,
       log
     });
     if (previous && state.approveQueue.length) {
@@ -6877,6 +6946,10 @@ async function ensureHookServerOnce() {
 function installSnippet() {
   const url = `http://127.0.0.1:${state.hookPort}/permission/${state.hookSecret ?? "<secret>"}`;
   return hookFragment(url, HOLD_MS() / 1e3 + TIMEOUT_PAD_S);
+}
+function statuslineSnippet() {
+  const url = `http://127.0.0.1:${state.hookPort}/statusline/${state.hookSecret ?? "<secret>"}`;
+  return statuslineFragment(url, { windows: !IS_MAC });
 }
 async function walkTranscripts(dir, cutoffMs) {
   const out = [];
@@ -8011,7 +8084,7 @@ if (process.argv.includes("--selftest")) {
       }
       if (msg.payload?.cmd === "getInstall") {
         send({ event: "sendToPropertyInspector", context, payload: {
-          install: { port: state.hookPort, holdS: HOLD_MS() / 1e3, snippet: installSnippet(), error: state.hookErr }
+          install: { port: state.hookPort, holdS: HOLD_MS() / 1e3, snippet: installSnippet(), statusline: statuslineSnippet(), error: state.hookErr }
         } });
       }
     } else if (event === "keyDown" && action) {

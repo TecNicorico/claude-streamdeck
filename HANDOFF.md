@@ -184,6 +184,25 @@ today/burn, it's a property of the log format.
   loop had separate clocks, and the loop called five minutes into a 30-minute hold.
   A Desktop file that parses to nothing logs its field names (`formaDesktop`, never
   the values), so a format change shows up in the log instead of a silent "throttled".
+- **The freshest source is Claude Code's status line** (1.13.0). On-device the
+  Desktop file held 12 samples over two weeks — once or twice a day — so it cannot
+  carry a 5h gauge. Every Claude Code session gets the account-wide 5h/7d percentages
+  in the headers of each answer (the CLI's `rate_limit_event`, `unifiedWindows`), and
+  hands them to the status line as `rate_limits` (`used_percentage` 0–100,
+  `resets_at` in SECONDS; a window it does not know yet is absent, #92081). They are
+  not in the transcripts (checked), and no hook receives them. So the status line
+  command is a `curl` that POSTs its stdin to the hook server's `/statusline/<secret>`
+  (same secret as the PermissionRequest hook, `onStatusline` in `hookserver.js`) and
+  prints the plain-text line the plugin answers (`rigaStatusline`). `curl.exe` on
+  Windows and `"@-"` quoted, so cmd, PowerShell and Git Bash all run it. The snippet
+  is in the usage keys' Property Inspector (`statuslineFragment`). Only terminal
+  sessions render a status line: cloud and VS Code sessions do not feed it.
+- **Local readings and their age:** `gaugeSource` gives `desktop` and `statusline`
+  six hours. From a local source a window already reset is not shown
+  (`finestraValida`: its reset time, or the reading's age against the window), and
+  after ten minutes the age replaces the countdown on the key (`ETA_PRIMA_MS`): "1h
+  5m left" on a two-hour-old number would read as current. A status line update
+  that repeats the same numbers is re-adopted at most once a minute.
 - Today/Burn Rate are computed locally from `~/.claude/projects/**/*.jsonl`
   transcripts. This only sees Claude Code activity on **this machine** — it
   undercounts relative to the account-wide gauges above if the user also

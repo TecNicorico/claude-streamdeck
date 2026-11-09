@@ -17,7 +17,7 @@ import {
 import { vistaPosta, facciaPosta, passwordDi, chiaveLettura, normEmail, modoDi } from "./posta.js";
 import { vistaTheCore, confTheCore } from "./thecore.js";
 import { budgetPct, gaugeSource, familyOf } from "./usage.js";
-import { cinqueOre } from "./consumi.js";
+import { cinqueOre, finestraValida, daEndpoint, SETTE_GIORNI_MS } from "./consumi.js";
 import {
   resolveStatusKey, statusEntry, sessionWhere, fmtShort, shortWait, sessionState,
   blockedSessions, titoloSessione,
@@ -60,9 +60,18 @@ export function fmtAgo(ms) {
 export function fmtEta(ms) {
   return ms < 60_000 ? "just now" : `${fmtAgo(ms)} ago`;
 }
-function sottoGauge(b, usageAt, now) {
+// Da una fonte locale (Desktop, la barra di stato) che non si aggiorna da dieci minuti
+// l'età viene prima del conto alla rovescia: «1h 5m left» su un numero di due ore fa
+// lo farebbe sembrare di adesso.
+export const ETA_PRIMA_MS = 10 * 60_000;
+function vecchia(state, now) {
+  return !daEndpoint(state.usageSrc) && now - (state.usageAt ?? now) >= ETA_PRIMA_MS;
+}
+function sottoGauge(b, state, now) {
   if (!b) return "no data";
-  return b.resetsAt ? fmtReset(b.resetsAt, now) : fmtEta(now - (usageAt ?? now));
+  const eta = now - (state.usageAt ?? now);
+  if (vecchia(state, now)) return fmtEta(eta);
+  return b.resetsAt ? fmtReset(b.resetsAt, now) : fmtEta(eta);
 }
 
 // ---------- gauge sourcing ----------
@@ -192,18 +201,18 @@ export function viewFor(kind, env) {
       if (mode === "local") return img(localGauge("LAST 5H", state.usageMeter?.["5h"], settings.budget, usageViewMode, animPhase));
       if (mode !== "subscription") return img(gaugeKey("SESSION 5H", null, mode === "throttled" ? "throttled" : mode === "error" ? "sign in?" : "no data"));
       const b = cinqueOre(state.usage, state.usageSrc, state.usageAt, now);
-      return img(gaugeKey("SESSION 5H", b?.pct ?? null, sottoGauge(b, state.usageAt, now), b?.pct >= 90 ? animPhase : null));
+      return img(gaugeKey("SESSION 5H", b?.pct ?? null, sottoGauge(b, state, now), b?.pct >= 90 ? animPhase : null));
     }
     case "usage-weekly": {
       const mode = gaugeMode(state, "usage-weekly", now);
       if (mode === "local") return img(localGauge("LAST 7D", state.usageMeter?.["7day"], settings.budget, usageViewMode, animPhase));
       if (mode !== "subscription") return img(gaugeKey("WEEKLY", null, mode === "throttled" ? "throttled" : mode === "error" ? "sign in?" : "no data"));
-      const b = state.usage?.weekly;
+      const b = finestraValida(state.usage?.weekly ?? null, state.usageSrc, state.usageAt, now, SETTE_GIORNI_MS);
       const u = state.usage;
-      const sub = u?.scopedPct != null && u.scopedName
-        ? `${u.scopedName} ${Math.round(u.scopedPct)}%`
+      const sub = !b || vecchia(state, now) ? sottoGauge(b, state, now)
+        : u?.scopedPct != null && u.scopedName ? `${u.scopedName} ${Math.round(u.scopedPct)}%`
         : u?.weeklyOpus?.pct != null ? `opus ${Math.round(u.weeklyOpus.pct)}%`
-        : sottoGauge(b, state.usageAt, now);
+        : sottoGauge(b, state, now);
       return img(gaugeKey("WEEKLY", b?.pct ?? null, sub, b?.pct >= 90 ? animPhase : null));
     }
     case "usage-model": {
@@ -221,7 +230,8 @@ export function viewFor(kind, env) {
       if (mmode === "local") {
         return img(localGauge(head_ + more, pick, settings.budget, usageViewMode, animPhase));
       }
-      return img(gaugeKey(head_ + more, pick.pct ?? null, sottoGauge(pick, state.usageAt, now), pick.pct >= 90 ? animPhase : null));
+      const valido = finestraValida(pick, state.usageSrc, state.usageAt, now, SETTE_GIORNI_MS);
+      return img(gaugeKey(head_ + more, valido?.pct ?? null, sottoGauge(valido, state, now), valido?.pct >= 90 ? animPhase : null));
     }
     case "burn-rate":
       return img(burnKey(state.burn?.tokensHour ?? null, sessionEta(state, now)));

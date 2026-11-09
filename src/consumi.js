@@ -1,7 +1,8 @@
 // Da dove vengono i consumi dell'abbonamento (Session 5h, Weekly, Model), senza I/O.
 // Provato da test/consumi.test.js.
 //
-// Le fonti sono due, e la prima non costa niente:
+// Le fonti sono tre, e le prime due non costano niente (la barra di stato, più sotto,
+// è la più fresca; il file di Desktop il ripiego senza configurazione):
 //
 // 1. Il file in cui Claude Desktop salva da sé le percentuali,
 //    `plan-usage-history.json`. Un campione ogni pochi minuti, `{t, org, u:{fh, sd,
@@ -137,37 +138,95 @@ export function formaDesktop(raw) {
   return `${samples.length} samples, last {${chiavi(ultimo)}}, u {${chiavi(ultimo?.u)}}`;
 }
 
-// Il 5 ore di Desktop vale solo nella sua finestra. Un campione più vecchio di cinque
-// ore viene per forza da una finestra già chiusa (dura cinque ore da quando si apre),
-// quindi la sua percentuale non dice niente di adesso: meglio nessun numero. Con l'ora
-// di reset (presa dall'endpoint) decide quella, come sempre.
-export const CINQUE_ORE_MS = 5 * 3.6e6;
-export function cinqueOre(usage, src, at, now) {
-  const b = usage?.fiveHour ?? null;
-  if (!b || src !== "desktop" || b.resetsAt) return b;
-  return now - (at ?? 0) >= CINQUE_ORE_MS ? null : b;
+// ---------- la barra di stato di Claude Code ----------
+// A ogni aggiornamento Claude Code passa alla barra di stato `rate_limits`: le stesse
+// percentuali che riceve con ogni risposta, dalle intestazioni della risposta e non
+// dall'endpoint dei consumi, quindi fresche anche mentre l'endpoint risponde 429.
+// `{five_hour:{used_percentage, resets_at}, seven_day:{…}}`, percento 0–100 e
+// resets_at in secondi (code.claude.com/docs/en/statusline; anthropics/claude-code
+// #92081). Una finestra che quella sessione non conosce ancora manca dall'oggetto:
+// non è uno zero.
+const istante = (v) => {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return new Date(n < 1e12 ? n * 1000 : n).toISOString();
+};
+export function letturaStatusline(payload, now) {
+  const rl = payload?.rate_limits;
+  if (!rl || typeof rl !== "object") return null;
+  const fin = (w) => (percento(w?.used_percentage) == null ? null : { pct: w.used_percentage, resetsAt: istante(w.resets_at) });
+  const fiveHour = fin(rl.five_hour), weekly = fin(rl.seven_day);
+  if (!fiveHour && !weekly) return null;
+  return { at: now, usage: { fiveHour, weekly, weeklyOpus: null, scopedPct: null, scopedName: null, models: [] } };
 }
+
+// La riga che la barra di stato mostra: modello, cartella, le due percentuali.
+export function rigaStatusline(payload) {
+  const parti = [];
+  const modello = payload?.model?.display_name;
+  if (typeof modello === "string" && modello) parti.push(modello);
+  const dir = payload?.workspace?.current_dir ?? payload?.cwd;
+  if (typeof dir === "string" && dir) parti.push(dir.split(/[\\/]/).filter(Boolean).pop() ?? dir);
+  const rl = payload?.rate_limits;
+  const p = (w) => (percento(w?.used_percentage) == null ? null : Math.round(w.used_percentage));
+  if (p(rl?.five_hour) != null) parti.push(`5h ${p(rl.five_hour)}%`);
+  if (p(rl?.seven_day) != null) parti.push(`7d ${p(rl.seven_day)}%`);
+  return parti.join(" · ");
+}
+
+// Il pezzo da incollare in ~/.claude/settings.json. `curl` manda alla porta del plugin
+// ciò che Claude Code passa alla barra di stato e stampa la riga che il plugin
+// risponde; a plugin spento non stampa niente, e dopo due secondi lascia perdere.
+// Su Windows `curl.exe`, che c'è da Windows 10 e si chiama uguale da cmd, PowerShell
+// e Git Bash (in Windows PowerShell `curl` è un altro comando).
+export function statuslineFragment(url, { windows = false } = {}) {
+  // `"@-"` fra virgolette: in PowerShell una @ nuda all'inizio di un argomento è
+  // l'operatore di splatting.
+  const command = `${windows ? "curl.exe" : "curl"} -s -m 2 --data-binary "@-" ${url}`;
+  return ['"statusLine": {', '  "type": "command",', `  "command": ${JSON.stringify(command)}`, "}"].join("\n");
+}
+
+// ---------- quanto vale una finestra ----------
+// Dall'endpoint un numero si mostra com'è: se l'ora di reset è passata il tasto dice
+// «resetting…» e il giro lo rilegge subito. Le fonti locali (Desktop, barra di stato)
+// non si rileggono a comando, e un numero di una finestra già ripartita non dice
+// niente di adesso: non si mostra. Decide l'ora di reset se c'è, se no l'età della
+// lettura contro la durata della finestra — un campione di Desktop più vecchio di
+// cinque ore viene per forza da una finestra chiusa.
+export const CINQUE_ORE_MS = 5 * 3.6e6;
+export const SETTE_GIORNI_MS = 7 * 24 * 3.6e6;
+export const daEndpoint = (src) => !src || src === "api";
+export function finestraValida(b, src, at, now, durataMs) {
+  if (!b || daEndpoint(src)) return b ?? null;
+  if (b.resetsAt) return new Date(b.resetsAt).getTime() > now ? b : null;
+  return now - (at ?? 0) < durataMs ? b : null;
+}
+export const cinqueOre = (usage, src, at, now) => finestraValida(usage?.fiveHour ?? null, src, at, now, CINQUE_ORE_MS);
 
 // ---------- mettere insieme le due ----------
 
 export const FRESCA_MS = 30 * 60_000; // la stessa soglia di USAGE_FRESH_MS (usage.js)
 const futuro = (iso, now) => !!iso && new Date(iso).getTime() > now;
 
-// Una lettura di Desktop (senza ore di reset né Fable) completata con la lettura di
+// Una lettura locale (Desktop: niente ore di reset né Fable; barra di stato: niente
+// Opus, Sonnet, Fable, e a volte una finestra che manca) completata con la lettura di
 // prima, quando questa vale ancora: l'ora di reset solo se è nel futuro (quella
-// finestra non è ancora ripartita, quindi è la stessa), i limiti per modello che
-// Desktop non ha solo se la lettura di prima è fresca.
+// finestra non è ancora ripartita, quindi è la stessa); una finestra o un modello che
+// mancano solo se la lettura di prima è fresca, e la sua finestra non è ripartita.
 export function completa(nuova, vecchia, vecchiaAt, now) {
   if (!vecchia) return nuova;
-  const reset = (b, old) => (b && b.resetsAt == null && futuro(old?.resetsAt, now) ? { ...b, resetsAt: old.resetsAt } : b);
   const fresca = now - (vecchiaAt ?? 0) < FRESCA_MS;
-  const models = nuova.models.map((m) => reset(m, (vecchia.models ?? []).find((o) => o.name === m.name)));
+  const unisci = (b, old) => {
+    if (!b) return fresca && old && (!old.resetsAt || futuro(old.resetsAt, now)) ? old : null;
+    return b.resetsAt == null && futuro(old?.resetsAt, now) ? { ...b, resetsAt: old.resetsAt } : b;
+  };
+  const models = nuova.models.map((m) => unisci(m, (vecchia.models ?? []).find((o) => o.name === m.name)));
   if (fresca) for (const o of vecchia.models ?? []) if (!models.some((m) => m.name === o.name)) models.push(o);
   return {
     ...nuova,
-    fiveHour: reset(nuova.fiveHour, vecchia.fiveHour),
-    weekly: reset(nuova.weekly, vecchia.weekly),
-    weeklyOpus: reset(nuova.weeklyOpus, vecchia.weeklyOpus),
+    fiveHour: unisci(nuova.fiveHour, vecchia.fiveHour),
+    weekly: unisci(nuova.weekly, vecchia.weekly),
+    weeklyOpus: unisci(nuova.weeklyOpus, vecchia.weeklyOpus),
     scopedPct: nuova.scopedPct ?? (fresca ? vecchia.scopedPct ?? null : null),
     scopedName: nuova.scopedName ?? (fresca ? vecchia.scopedName ?? null : null),
     models,
@@ -178,14 +237,15 @@ export function completa(nuova, vecchia, vecchiaAt, now) {
 
 export const API_BASE_MS = 5 * 60_000;
 export const API_MAX_MS = 30 * 60_000;
-// Con Desktop fresco l'endpoint serve solo per le ore di reset e Fable: una volta
-// ogni mezz'ora basta, e lascia il limite dell'account alle sessioni.
+// Con una fonte locale fresca (Desktop o la barra di stato) l'endpoint serve solo per
+// Fable e, per Desktop, le ore di reset: una volta ogni mezz'ora basta, e lascia il
+// limite dell'account alle sessioni.
 export const DESKTOP_BASTA_MS = 10 * 60_000;
 export const API_CON_DESKTOP_MS = 30 * 60_000;
 
 export function serveEndpoint({ now, usageAt, src, apiOkAt }) {
-  const desktopFresco = src === "desktop" && now - (usageAt ?? 0) < DESKTOP_BASTA_MS;
-  if (!desktopFresco) return true;
+  const localeFresca = !daEndpoint(src) && now - (usageAt ?? 0) < DESKTOP_BASTA_MS;
+  if (!localeFresca) return true;
   return now - (apiOkAt ?? 0) >= API_CON_DESKTOP_MS;
 }
 

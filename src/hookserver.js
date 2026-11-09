@@ -16,11 +16,14 @@ const sameSecret = (a, b) => {
   return A.length === B.length && timingSafeEqual(A, B);
 };
 
-export function startHookServer({ port, secret, onRequest, onDrop, log = () => {}, retries = 3, retryMs = 500 }) {
+export function startHookServer({ port, secret, onRequest, onDrop, onStatusline = null, log = () => {}, retries = 3, retryMs = 500 }) {
   if (!secret || String(secret).length < 32) {
     return Promise.reject(new Error("hook secret too short"));
   }
   const wantPath = `/permission/${secret}`;
+  // La barra di stato di Claude Code (src/consumi.js): stesso segreto, un'altra strada.
+  // Risponde subito, in testo semplice: è la riga che la barra mostra.
+  const statusPath = `/statusline/${secret}`;
   // badPathHits: timestamps of recent wrong-path requests, pruned to BADPATH_WINDOW_MS
   // on every hit. The caller (src/plugin.js) re-filters by the window at READ time too,
   // so the signal decays even if no further bad requests ever arrive to prune it.
@@ -30,7 +33,8 @@ export function startHookServer({ port, secret, onRequest, onDrop, log = () => {
   const server = createServer((req, res) => {
     const deny = (code) => { res.writeHead(code).end(); };
     // Path is the credential. Exact match only - no query, no trailing segment.
-    if (!sameSecret(req.url ?? "", wantPath)) {
+    const statusline = !!onStatusline && sameSecret(req.url ?? "", statusPath);
+    if (!statusline && !sameSecret(req.url ?? "", wantPath)) {
       const now = Date.now();
       stats.badPathHits.push(now);
       stats.badPathHits = stats.badPathHits.filter((t) => now - t < BADPATH_WINDOW_MS);
@@ -65,6 +69,12 @@ export function startHookServer({ port, secret, onRequest, onDrop, log = () => {
       if (over) return;
       let payload;
       try { payload = JSON.parse(body || "{}"); } catch { return deny(400); }
+      if (statusline) {
+        let riga = "";
+        try { riga = String(onStatusline(payload) ?? ""); } catch (e) { log("statusline threw:", String(e)); }
+        res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        return res.end(riga);
+      }
 
       const ticket = {
         id: null,

@@ -9,7 +9,7 @@ import path from "node:path";
 import { spawn, execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { escapeAppleScript, parseHotkey, hotkeyClause, classifyCustomCommand, parseKeychainToken, parsePsTree, hostAppForPid, focusStrategyForBundle, terminalFocusScript, parseProcStarts } from "./osa.js";
-import { usageDaRisposta, percorsiDesktop, letturaDesktop, formaDesktop, completa, serveEndpoint, ritardoDopo429, API_BASE_MS } from "./consumi.js";
+import { usageDaRisposta, percorsiDesktop, letturaDesktop, formaDesktop, letturaStatusline, rigaStatusline, statuslineFragment, completa, serveEndpoint, ritardoDopo429, API_BASE_MS } from "./consumi.js";
 import { windowStartMs, parseRequests, mergeById, aggregate, aggregateByModel, budgetPct, localDay, newDayCounts, foldDayChunk, dayCountsTotals } from "./usage.js";
 import { resolveStatusKey, statusEntry, autoSlot, sessionState, blockedSessions, sessionSig, transcriptPathFor, pidLooksRecycled } from "./status.js";
 import { randomBytes, createHash } from "node:crypto";
@@ -154,7 +154,7 @@ try {
 function adottaConsumi(usage, at, src) {
   if (src !== "api" && at <= state.usageAt) return false;
   if (src !== state.usageSrc) log(`usage source: ${src} (sample ${Math.round((Date.now() - at) / 60_000)}m old)`);
-  state.usage = src === "desktop" ? completa(usage, state.usage, state.usageAt, Date.now()) : usage;
+  state.usage = src !== "api" ? completa(usage, state.usage, state.usageAt, Date.now()) : usage;
   state.usageAt = at;
   state.usageSrc = src;
   const fp5 = state.usage.fiveHour?.pct;
@@ -193,6 +193,26 @@ async function pollDesktopUsage() {
   if (!best) return;
   if (bestPath !== desktopTrovato) { desktopTrovato = bestPath; log("usage: Claude Desktop history at", bestPath); }
   adottaConsumi(best.usage, best.at, "desktop");
+}
+
+// La barra di stato di Claude Code nel terminale (src/consumi.js): a ogni aggiornamento
+// porta le percentuali che la sessione ha ricevuto con l'ultima risposta. Arriva anche
+// più volte al secondo mentre Claude scrive: un numero uguale si riprende al più una
+// volta al minuto, uno cambiato subito.
+let statuslineAt = 0;
+function onStatusline(payload) {
+  const now = Date.now();
+  const l = letturaStatusline(payload, now);
+  if (l) {
+    const u = state.usage;
+    const uguale = state.usageSrc === "statusline"
+      && u?.fiveHour?.pct === l.usage.fiveHour?.pct && u?.weekly?.pct === l.usage.weekly?.pct;
+    if (!uguale || now - statuslineAt >= 60_000) {
+      statuslineAt = now;
+      adottaConsumi(l.usage, l.at, "statusline");
+    }
+  }
+  return rigaStatusline(payload);
 }
 
 async function pollUsage({ forza = false } = {}) {
@@ -588,7 +608,7 @@ async function ensureHookServerOnce() {
   const previous = hookServer;
   try {
     const next = await startHookServer({
-      port, secret, onRequest: onHookRequest, onDrop: onHookDrop, log,
+      port, secret, onRequest: onHookRequest, onDrop: onHookDrop, onStatusline, log,
     });
     // Requests held by the old server belong to a socket we are about to drop.
     if (previous && state.approveQueue.length) {
@@ -616,6 +636,10 @@ function installSnippet() {
   const url = `http://127.0.0.1:${state.hookPort}/permission/${state.hookSecret ?? "<secret>"}`;
   // Padded (see TIMEOUT_PAD_S above): the hold itself stays HOLD_MS()/1000.
   return hookFragment(url, HOLD_MS() / 1000 + TIMEOUT_PAD_S);
+}
+function statuslineSnippet() {
+  const url = `http://127.0.0.1:${state.hookPort}/statusline/${state.hookSecret ?? "<secret>"}`;
+  return statuslineFragment(url, { windows: !IS_MAC });
 }
 
 // Recursively collect .jsonl transcript files (including <uuid>/subagents/)
@@ -1844,7 +1868,7 @@ if (process.argv.includes("--selftest")) {
       }
       if (msg.payload?.cmd === "getInstall") {
         send({ event: "sendToPropertyInspector", context, payload: {
-          install: { port: state.hookPort, holdS: HOLD_MS() / 1000, snippet: installSnippet(), error: state.hookErr },
+          install: { port: state.hookPort, holdS: HOLD_MS() / 1000, snippet: installSnippet(), statusline: statuslineSnippet(), error: state.hookErr },
         } });
       }
     } else if (event === "keyDown" && action) {

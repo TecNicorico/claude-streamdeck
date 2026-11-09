@@ -616,3 +616,18 @@ test("un numero senza ora di reset (dal file di Claude Desktop) dice da quanto �
   assert.doesNotMatch(drawn("usage-session", { state: seiOre }), /64/);
   assert.match(drawn("usage-weekly", { state: seiOre }), /29/);
 });
+
+test("dalla barra di stato: conto alla rovescia finché è fresca, poi l'età", () => {
+  const state = {
+    ...emptyState(), usageSrc: "statusline", usageAt: NOW - 60_000,
+    usage: { fiveHour: { pct: 23, resetsAt: new Date(NOW + 90 * 60_000).toISOString() }, weekly: { pct: 41, resetsAt: new Date(NOW + 2 * 24 * 3.6e6).toISOString() }, models: [] },
+  };
+  assert.match(drawn("usage-session", { state }), /1h 30m left/);
+  const dopo = { ...state, usageAt: NOW - 40 * 60_000 };
+  assert.match(drawn("usage-session", { state: dopo }), /40m ago/);
+  assert.match(drawn("usage-weekly", { state: dopo }), /40m ago/);
+  // La finestra di 5 ore è ripartita da quando è stata letta: niente numero vecchio.
+  const ripartita = { ...dopo, usage: { ...state.usage, fiveHour: { pct: 23, resetsAt: new Date(NOW - 60_000).toISOString() } } };
+  assert.match(drawn("usage-session", { state: dopo }), /23%/);
+  assert.doesNotMatch(drawn("usage-session", { state: ripartita }), /23%/);
+});

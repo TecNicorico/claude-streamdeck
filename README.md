@@ -10,6 +10,8 @@ The usage gauges show the **same session/weekly percentages Claude Desktop and C
 
 The usage endpoint's rate limit is **per account** and shared with every Claude Code session, which polls it too: with many sessions open it can answer 429 for hours (anthropics/claude-code#77477). That is why the Desktop file comes first; with Claude Desktop running the gauges keep their numbers through a 429, and a number without a reset time says how old it is (`4m ago`).
 
+Desktop rewrites that file only now and then (on one Windows PC: once or twice a day), so for a 5-hour gauge that keeps up, let **Claude Code's status line** feed the plugin. Claude Code hands the status line the same percentages it receives with every answer, so they stay fresh while the usage endpoint is answering 429. Copy the snippet from any usage key's settings (**Consumi aggiornati dal terminale**) into `~/.claude/settings.json`, next to `"hooks"`, and reopen Claude Code: the status line then shows `Opus 5.5 · my-project · 5h 23% · 7d 41%`, and the deck follows it. It replaces a status line you already have, and only works while a Claude Code session is open in a terminal.
+
 ![Every Agent Vitals key: usage gauges, shortcuts, session status, and the permission-prompt keys](docs/keys.png)
 
 ## Keys
