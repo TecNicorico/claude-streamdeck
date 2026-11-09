@@ -2269,8 +2269,8 @@ var require_websocket = __commonJS({
     var https = __require("https");
     var http = __require("http");
     var net = __require("net");
-    var tls = __require("tls");
-    var { randomBytes: randomBytes2, createHash } = __require("crypto");
+    var tls2 = __require("tls");
+    var { randomBytes: randomBytes2, createHash: createHash2 } = __require("crypto");
     var { Duplex, Readable } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -2938,7 +2938,7 @@ var require_websocket = __commonJS({
           abortHandshake(websocket, socket, "Invalid Upgrade header");
           return;
         }
-        const digest = createHash("sha1").update(key + GUID).digest("base64");
+        const digest = createHash2("sha1").update(key + GUID).digest("base64");
         if (res.headers["sec-websocket-accept"] !== digest) {
           abortHandshake(websocket, socket, "Invalid Sec-WebSocket-Accept header");
           return;
@@ -3019,7 +3019,7 @@ var require_websocket = __commonJS({
       if (!options.servername && options.servername !== "") {
         options.servername = net.isIP(options.host) ? "" : options.host;
       }
-      return tls.connect(options);
+      return tls2.connect(options);
     }
     function abortHandshake(websocket, stream, message) {
       websocket._readyState = WebSocket2.CLOSING;
@@ -3307,7 +3307,7 @@ var require_websocket_server = __commonJS({
     var EventEmitter = __require("events");
     var http = __require("http");
     var { Duplex } = __require("stream");
-    var { createHash } = __require("crypto");
+    var { createHash: createHash2 } = __require("crypto");
     var extension2 = require_extension();
     var PerMessageDeflate2 = require_permessage_deflate();
     var subprotocol2 = require_subprotocol();
@@ -3614,7 +3614,7 @@ var require_websocket_server = __commonJS({
           );
         }
         if (this._state > RUNNING) return abortHandshake(socket, 503);
-        const digest = createHash("sha1").update(key + GUID).digest("base64");
+        const digest = createHash2("sha1").update(key + GUID).digest("base64");
         const headers = [
           "HTTP/1.1 101 Switching Protocols",
           "Upgrade: websocket",
@@ -4188,7 +4188,494 @@ function statusEntry(resolved, cycleIdx = null) {
 }
 
 // src/plugin.js
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
+
+// src/imap.js
+import tls from "node:tls";
+var HOST_GMAIL = "imap.gmail.com";
+var PORTA_IMAPS = 993;
+var MODI = ["principale", "tutta"];
+var MAX_FILI = 999;
+var ImapErrore = class extends Error {
+  // tipo: "credenziali" | "rifiutato" | "timeout" | "rete" | "protocollo"
+  constructor(tipo, messaggio) {
+    super(messaggio);
+    this.name = "ImapErrore";
+    this.tipo = tipo;
+  }
+};
+function quoted(s) {
+  const t = String(s ?? "");
+  if (/[\r\n\0]/.test(t)) throw new ImapErrore("protocollo", "un a capo non pu\xF2 stare in una stringa IMAP");
+  return '"' + t.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
+}
+function passwordPulita(p) {
+  return String(p ?? "").replace(/\s+/g, "");
+}
+function idDaSearch(righe) {
+  const out = [];
+  for (const r of righe) {
+    const m = /^\* SEARCH(?: (.*))?$/i.exec(r);
+    if (!m) continue;
+    for (const x of (m[1] ?? "").trim().split(/\s+/)) if (/^\d+$/.test(x)) out.push(Number(x));
+  }
+  return out;
+}
+function unseenDaStatus(righe) {
+  for (const r of righe) {
+    const m = /^\* STATUS .*\(.*\bUNSEEN (\d+).*\)\s*$/i.exec(r);
+    if (m) return Number(m[1]);
+  }
+  return null;
+}
+function filiDaFetch(righe) {
+  const fili = /* @__PURE__ */ new Set();
+  for (const r of righe) {
+    const m = /^\* \d+ FETCH \(.*\bX-GM-THRID (\d+)/i.exec(r);
+    if (m) fili.add(m[1]);
+  }
+  return fili;
+}
+function insieme(ids) {
+  const s = [...new Set(ids)].sort((a, b) => a - b);
+  const parti2 = [];
+  for (let i = 0; i < s.length; i++) {
+    let j = i;
+    while (j + 1 < s.length && s[j + 1] === s[j] + 1) j++;
+    parti2.push(j > i ? `${s[i]}:${s[j]}` : String(s[i]));
+    i = j;
+  }
+  return parti2.join(",");
+}
+function tipoRifiuto(testo) {
+  if (/\[(AUTHENTICATIONFAILED|AUTHORIZATIONFAILED)\]/i.test(testo) || /invalid credentials/i.test(testo)) return "credenziali";
+  return "rifiutato";
+}
+function sessione(sock, timeoutMs) {
+  let buf = "";
+  let attesa = null;
+  let fine = null;
+  let seq = 0;
+  const chiudi = (err) => {
+    if (fine) return;
+    fine = err ?? new ImapErrore("rete", "connessione chiusa");
+    clearTimeout(timer);
+    if (attesa) {
+      attesa.reject(fine);
+      attesa = null;
+    }
+    sock.destroy();
+  };
+  const timer = setTimeout(() => chiudi(new ImapErrore("timeout", `nessuna risposta in ${Math.round(timeoutMs / 1e3)} s`)), timeoutMs);
+  const riga = (l) => {
+    if (!attesa) return;
+    if (attesa.saluto) {
+      if (/^\* (OK|PREAUTH)\b/i.test(l)) {
+        const a = attesa;
+        attesa = null;
+        a.resolve();
+      } else if (/^\* BYE\b/i.test(l)) chiudi(new ImapErrore("rifiutato", l.slice(2)));
+      return;
+    }
+    if (l.startsWith(attesa.tag + " ")) {
+      const resto = l.slice(attesa.tag.length + 1);
+      const a = attesa;
+      attesa = null;
+      if (/^OK\b/i.test(resto)) a.resolve(a.righe);
+      else a.reject(new ImapErrore(tipoRifiuto(resto), resto.replace(/^(NO|BAD)\s*/i, "")));
+      return;
+    }
+    attesa.righe.push(l);
+  };
+  sock.setEncoding?.("utf8");
+  sock.on("data", (d) => {
+    buf += d;
+    let i;
+    while ((i = buf.indexOf("\r\n")) >= 0) {
+      const l = buf.slice(0, i);
+      buf = buf.slice(i + 2);
+      riga(l);
+    }
+  });
+  sock.on("error", (e) => chiudi(new ImapErrore("rete", String(e?.code ?? e?.message ?? e))));
+  sock.on("close", () => chiudi());
+  return {
+    saluto() {
+      if (fine) return Promise.reject(fine);
+      return new Promise((resolve2, reject) => {
+        attesa = { saluto: true, resolve: resolve2, reject };
+      });
+    },
+    comando(testo) {
+      if (fine) return Promise.reject(fine);
+      const tag = "a" + ++seq;
+      return new Promise((resolve2, reject) => {
+        attesa = { tag, righe: [], resolve: resolve2, reject };
+        sock.write(`${tag} ${testo}\r
+`);
+      });
+    },
+    // LOGOUT di cortesia: se il server chiude prima di rispondere, va bene lo stesso.
+    async esci() {
+      try {
+        await this.comando("LOGOUT");
+      } catch {
+      }
+      chiudi(new ImapErrore("rete", "chiusa"));
+    },
+    chiudi
+  };
+}
+function connettiTls({ host, port }) {
+  return tls.connect({ host, port, servername: host });
+}
+async function contaNonLette({ user, pass, modo = "principale", host = HOST_GMAIL, port = PORTA_IMAPS, timeoutMs = 2e4 }, { connect = connettiTls } = {}) {
+  if (!user || !pass) throw new ImapErrore("credenziali", "mancano indirizzo o password");
+  const m = MODI.includes(modo) ? modo : "principale";
+  const s = sessione(connect({ host, port }), timeoutMs);
+  try {
+    await s.saluto();
+    await s.comando(`LOGIN ${quoted(user)} ${quoted(passwordPulita(pass))}`);
+    if (m === "tutta") {
+      const n = unseenDaStatus(await s.comando('STATUS "INBOX" (UNSEEN)'));
+      if (n == null) throw new ImapErrore("protocollo", "STATUS senza UNSEEN");
+      return { n, messaggi: n, modo: m };
+    }
+    await s.comando('EXAMINE "INBOX"');
+    const ids = idDaSearch(await s.comando(`SEARCH X-GM-RAW ${quoted("category:primary is:unread")}`));
+    if (!ids.length) return { n: 0, messaggi: 0, modo: m };
+    if (ids.length > MAX_FILI) return { n: ids.length, messaggi: ids.length, modo: m };
+    const fili = filiDaFetch(await s.comando(`FETCH ${insieme(ids)} (X-GM-THRID)`));
+    return { n: fili.size || ids.length, messaggi: ids.length, modo: m };
+  } finally {
+    await s.esci();
+  }
+}
+
+// src/posta.js
+var INTERVALLO_POSTA_MS = 12e4;
+var RITARDO_ERRORE_MS = 3e5;
+function normEmail(s) {
+  const e = String(s ?? "").trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : "";
+}
+function modoDi(settings) {
+  return settings?.modo === "tutta" ? "tutta" : "principale";
+}
+function urlGmail(email) {
+  const e = normEmail(email);
+  return e ? `https://mail.google.com/mail/u/?authuser=${encodeURIComponent(e)}` : "https://mail.google.com/mail/";
+}
+function passwordDi(globalSettings, email) {
+  const e = normEmail(email);
+  const p = e ? globalSettings?.posta?.[e]?.password : "";
+  return typeof p === "string" ? p : "";
+}
+function chiaveLettura(email, modo) {
+  return `${normEmail(email)}|${modo}`;
+}
+function caselleDaLeggere(views2, globalSettings) {
+  const out = /* @__PURE__ */ new Map();
+  for (const v of views2) {
+    if (v?.kind !== "posta") continue;
+    const email = normEmail(v.settings?.email);
+    const pass = passwordDi(globalSettings, email);
+    if (!email || !pass) continue;
+    const modo = modoDi(v.settings);
+    out.set(chiaveLettura(email, modo), { email, modo, pass });
+  }
+  return [...out.entries()].map(([chiave, c]) => ({ chiave, ...c }));
+}
+function prossimaLettura(rec, now, impronta2) {
+  if (!rec) return now;
+  if (rec.err === "credenziali" && rec.impronta === impronta2) return Infinity;
+  if (rec.err && rec.impronta === impronta2) return rec.at + RITARDO_ERRORE_MS;
+  if (rec.impronta !== impronta2) return now;
+  return rec.at + INTERVALLO_POSTA_MS;
+}
+var ora = (t) => {
+  const d = new Date(t);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+function numeroBreve(n) {
+  return n > 999 ? "999+" : String(n);
+}
+function vistaPosta({ settings, rec, haPassword }) {
+  const email = normEmail(settings?.email);
+  const etichetta2 = String(settings?.label ?? "").trim() || (email ? email.split("@")[0] : "posta");
+  const modo = modoDi(settings);
+  const out = (valore2, sub, tono = null) => ({ titolo: etichetta2, valore: valore2, sub, tono, email });
+  if (!email) return out("\u2014", "imposta l'indirizzo");
+  if (!haPassword) return out("\u2014", "manca la password", "attenzione");
+  if (!rec) return out("\u2026", "lettura\u2026");
+  if (rec.err === "credenziali") return out("!", "password rifiutata", "attenzione");
+  if (rec.err === "rifiutato" && rec.n == null) return out("!", "IMAP rifiutato", "attenzione");
+  if (rec.n == null) return out("--", rec.err === "timeout" ? "non risponde" : "non raggiungibile");
+  const valore = numeroBreve(rec.n);
+  if (rec.err) return out(valore, `offline \xB7 ${ora(rec.okAt ?? rec.at)}`);
+  if (rec.n === 0) return out(valore, "tutto letto");
+  return out(valore, modo === "tutta" ? "in arrivo" : "da leggere");
+}
+function statoPosta({ settings, rec, haPassword }) {
+  const email = normEmail(settings?.email);
+  if (!email) return "Scrivi l'indirizzo della casella.";
+  if (!haPassword) return "Manca la password per le app di questo indirizzo.";
+  if (!rec) return "In lettura\u2026";
+  if (rec.err === "credenziali") return "Google ha rifiutato la password: generane una nuova e incollala qui. Il tasto non riprova da solo.";
+  if (rec.err === "rifiutato") return "Google ha rifiutato l'accesso IMAP: per un account di lavoro, l'amministratore pu\xF2 averlo spento.";
+  if (rec.err) return `Non raggiungibile (${rec.err})${rec.n != null ? `: l'ultimo numero \xE8 delle ${ora(rec.okAt ?? rec.at)}` : ""}.`;
+  return `Collegato \xB7 ${rec.n} ${modoDi(settings) === "tutta" ? "messaggi" : "conversazioni"} da leggere \xB7 ${ora(rec.at)}`;
+}
+
+// src/thecore.js
+var INTERVALLO_THECORE_MS = 3e5;
+var RITARDO_ERRORE_THECORE_MS = 12e4;
+var VERSIONE = 1;
+function stagioneBreve(codice) {
+  const m = /^(\d{4})-(\d{4})$/.exec(String(codice ?? ""));
+  return m ? `${m[1].slice(2)}/${m[2].slice(2)}` : String(codice ?? "");
+}
+var migliaia = (n) => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+var decimale = (n, cifre) => n.toFixed(cifre).replace(".", ",");
+function euroBreve(n) {
+  if (typeof n !== "number" || !Number.isFinite(n)) return "--";
+  const a = Math.abs(n), s = n < 0 ? "-" : "";
+  if (a < 1e4) return `\u20AC ${s}${migliaia(a)}`;
+  if (a < 1e5) return `\u20AC ${s}${decimale(a / 1e3, 1)}k`;
+  if (a < 1e6) return `\u20AC ${s}${Math.round(a / 1e3)}k`;
+  return `\u20AC ${s}${decimale(a / 1e6, 2)}M`;
+}
+function numero(n) {
+  return typeof n === "number" && Number.isFinite(n) ? migliaia(n) : "--";
+}
+function variazione(adesso, prima) {
+  if (typeof adesso !== "number" || typeof prima !== "number" || !(prima > 0)) return null;
+  const p = Math.round((adesso - prima) / prima * 100);
+  return p > 0 ? `\u25B2 ${p}%` : p < 0 ? `\u25BC ${-p}%` : "= 0%";
+}
+var conto = (n, uno, molti) => `${numero(n)} ${n === 1 ? uno : molti}`;
+var METRICHE = {
+  // --------------------------------------------------------------- vendite
+  fatturato: {
+    gruppo: "Vendite",
+    nome: "Fatturato della stagione",
+    titolo: "fatturato",
+    glifo: "euro",
+    pagina: "/economics/pl",
+    vista: (d) => {
+      const v = d.vendite.fatturato, p = d.vendite.fatturatoAnnoScorso;
+      const varia = variazione(v, p);
+      return { valore: euroBreve(v), sub: varia ? `${varia} vs ${stagioneBreve(d.stagione.precedente)}` : `oggi ${euroBreve(d.vendite.fatturatoOggi)}` };
+    }
+  },
+  ordini_oggi: {
+    gruppo: "Vendite",
+    nome: "Ordini di oggi",
+    titolo: "ordini oggi",
+    glifo: "euro",
+    pagina: "/economics/dashboard-ordini",
+    vista: (d) => ({ valore: numero(d.vendite.ordiniOggi), sub: `${euroBreve(d.vendite.fatturatoOggi)} \xB7 ieri ${numero(d.vendite.ordiniIeri)}` })
+  },
+  ufficializzate: {
+    gruppo: "Vendite",
+    nome: "Scuole ufficializzate",
+    titolo: "firmate",
+    glifo: "scuola",
+    pagina: "/directory",
+    vista: (d) => ({ valore: numero(d.vendite.ufficializzate), sub: `su ${numero(d.directory.raggiunte)} raggiunte` })
+  },
+  // ------------------------------------------------------------- directory
+  raggiunte: {
+    gruppo: "Directory",
+    nome: "Scuole raggiunte",
+    titolo: "raggiunte",
+    glifo: "scuola",
+    pagina: "/metriche",
+    vista: (d) => {
+      const v = d.directory.raggiunte, p = d.directory.raggiunteAnnoScorso;
+      const varia = variazione(v, p);
+      return { valore: numero(v), sub: varia ? `${varia} vs ${stagioneBreve(d.stagione.precedente)}` : "in Directory" };
+    }
+  },
+  da_assegnare: {
+    gruppo: "Directory",
+    nome: "Scuole senza sales",
+    titolo: "senza sales",
+    glifo: "scuola",
+    pagina: "/directory",
+    vista: (d) => {
+      const c = d.directory.competitor;
+      return c > 0 ? { valore: numero(d.directory.daAssegnare), sub: conto(c, "competitor", "competitor"), tono: "attenzione" } : { valore: numero(d.directory.daAssegnare), sub: "da assegnare" };
+    }
+  },
+  richieste: {
+    gruppo: "Directory",
+    nome: "Richieste dal form da assegnare",
+    titolo: "richieste",
+    glifo: "posta",
+    pagina: "/contatti-senza-scuola",
+    vista: (d) => ({ valore: numero(d.directory.richieste), sub: "dal form", tono: d.directory.richieste > 0 ? "attenzione" : null })
+  },
+  // ---------------------------------------------------------------- hiring
+  ris_da_scrutinare: {
+    gruppo: "Hiring",
+    nome: "Candidature da scrutinare",
+    titolo: "candidature",
+    glifo: "persone",
+    pagina: "/ris/lavora",
+    vista: (d) => ({
+      valore: numero(d.hiring.daScrutinare),
+      sub: d.hiring.arrivateOggi > 0 ? `da scrutinare \xB7 +${numero(d.hiring.arrivateOggi)}` : "da scrutinare",
+      tono: d.hiring.daScrutinare > 0 ? "attenzione" : null
+    })
+  },
+  ris_documenti: {
+    gruppo: "Hiring",
+    nome: "Documenti da verificare",
+    titolo: "documenti",
+    glifo: "persone",
+    pagina: "/ris/candidature",
+    vista: (d) => ({ valore: numero(d.hiring.documentiDaVerificare), sub: "da verificare", tono: d.hiring.documentiDaVerificare > 0 ? "attenzione" : null })
+  },
+  eletti_senza_documento: {
+    gruppo: "Hiring",
+    nome: "Eletti senza documento",
+    titolo: "senza doc.",
+    glifo: "persone",
+    pagina: "/ris/candidature",
+    vista: (d) => ({ valore: numero(d.hiring.elettiSenzaDocumento), sub: "da contattare", tono: d.hiring.elettiSenzaDocumento > 0 ? "attenzione" : null })
+  },
+  ris_eletti: {
+    gruppo: "Hiring",
+    nome: "RIS eletti",
+    titolo: "RIS",
+    glifo: "persone",
+    pagina: "/ris/metriche",
+    vista: (d) => ({ valore: numero(d.hiring.risEletti), sub: "eletti col documento" })
+  },
+  // ------------------------------------------------------------- operativo
+  avvisi: {
+    gruppo: "Operativo",
+    nome: "Avvisi della Dashboard",
+    titolo: "avvisi",
+    glifo: "alert",
+    pagina: "/dashboard",
+    vista: (d) => {
+      const r = d.operativo.avvisiRossi, g = d.operativo.avvisiGialli;
+      return { valore: numero(r), sub: `rossi \xB7 ${numero(g)} gialli`, tono: r > 0 ? "attenzione" : null };
+    }
+  },
+  job: {
+    // Nessuna pagina mostra l'outbox: premuto rilegge.
+    gruppo: "Operativo",
+    nome: "Job dell'outbox",
+    titolo: "outbox",
+    glifo: "battito",
+    pagina: null,
+    vista: (d) => {
+      const f = d.operativo.jobFalliti, r = d.operativo.jobInRitardo;
+      if (f === 0 && r === 0) return { valore: "ok", sub: "nessun job fermo" };
+      return { valore: numero(f + r), sub: `${conto(f, "fallito", "falliti")} \xB7 ${conto(r, "fermo", "fermi")}`, tono: "guasto" };
+    }
+  },
+  plao: {
+    gruppo: "Operativo",
+    nome: "PLAO da controllare",
+    titolo: "PLAO firmate",
+    glifo: "euro",
+    pagina: "/economics/paghe",
+    vista: (d) => ({
+      valore: numero(d.operativo.plaoFirmate),
+      sub: `${numero(d.operativo.plaoDaFirmare)} da firmare`,
+      tono: d.operativo.plaoFirmate > 0 ? "attenzione" : null
+    })
+  },
+  fornitori: {
+    gruppo: "Operativo",
+    nome: "Ordini fornitori con un problema",
+    titolo: "fornitori",
+    glifo: "alert",
+    pagina: "/ordini-fornitori",
+    vista: (d) => ({ valore: numero(d.operativo.fornitoriProblema), sub: "con un problema", tono: d.operativo.fornitoriProblema > 0 ? "guasto" : null })
+  }
+};
+var METRICA_DEFAULT = "fatturato";
+function metricaDi(settings) {
+  return Object.hasOwn(METRICHE, settings?.metrica) ? settings.metrica : METRICA_DEFAULT;
+}
+function urlPagina(app, pagina2) {
+  const base2 = String(app ?? "").trim().replace(/\/+$/, "");
+  if (!/^https?:\/\//.test(base2) || !pagina2) return null;
+  return base2 + pagina2;
+}
+function confTheCore(globalSettings) {
+  const url = String(globalSettings?.thecoreUrl ?? "").trim().replace(/\/+$/, "");
+  const chiave = String(globalSettings?.thecoreKey ?? "").trim();
+  const app = String(globalSettings?.thecoreApp ?? "").trim();
+  return { url, chiave, app, completa: /^https:\/\//.test(url) && chiave !== "" };
+}
+function riassuntoValido(d) {
+  return !!d && d.versione === VERSIONE && ["vendite", "directory", "hiring", "operativo"].every((g) => d[g] && typeof d[g] === "object") && !!d.stagione;
+}
+var TheCoreErrore = class extends Error {
+  // tipo: "chiave" | "server" | "rete" | "formato" | "stagione"
+  constructor(tipo, messaggio) {
+    super(messaggio);
+    this.name = "TheCoreErrore";
+    this.tipo = tipo;
+  }
+};
+async function leggiTheCore({ url, chiave }, { fetchFn = fetch, timeoutMs = 2e4 } = {}) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), timeoutMs);
+  let r;
+  try {
+    r = await fetchFn(url, { headers: { "x-api-key": chiave, accept: "application/json" }, signal: ac.signal });
+  } catch (e) {
+    throw new TheCoreErrore("rete", String(e?.cause?.code ?? e?.message ?? e));
+  } finally {
+    clearTimeout(t);
+  }
+  if (r.status === 401) throw new TheCoreErrore("chiave", "chiave non valida o revocata");
+  if (!r.ok) throw new TheCoreErrore("server", `HTTP ${r.status}`);
+  let d;
+  try {
+    d = await r.json();
+  } catch {
+    throw new TheCoreErrore("formato", "risposta non JSON");
+  }
+  if (d && d.versione === VERSIONE && d.stagione === null) throw new TheCoreErrore("stagione", "nessuna stagione attiva");
+  if (!riassuntoValido(d)) throw new TheCoreErrore("formato", `risposta inattesa (versione ${d?.versione ?? "?"})`);
+  return d;
+}
+var ora2 = (t) => {
+  const d = new Date(t);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+var MESSAGGIO_ERRORE = { chiave: "chiave?", server: "TheCore in errore", rete: "non raggiungibile", formato: "risposta strana", stagione: "nessuna stagione" };
+function vistaTheCore({ settings, tc, conf }) {
+  const id = metricaDi(settings);
+  const m = METRICHE[id];
+  const base2 = { titolo: m.titolo, glifo: m.glifo, pagina: m.pagina, metrica: id };
+  if (!conf?.completa) return { ...base2, valore: "\u2014", sub: "imposta TheCore", tono: null };
+  if (tc?.err === "chiave") return { ...base2, valore: "!", sub: "chiave rifiutata", tono: "attenzione" };
+  if (!tc?.dati) {
+    if (tc?.err) return { ...base2, valore: "--", sub: MESSAGGIO_ERRORE[tc.err] ?? tc.err, tono: tc.err === "stagione" ? null : "attenzione" };
+    return { ...base2, valore: "\u2026", sub: "lettura\u2026", tono: null };
+  }
+  const v = m.vista(tc.dati);
+  if (tc.err) return { ...base2, valore: v.valore, sub: `offline \xB7 ${ora2(tc.okAt ?? tc.at)}`, tono: null };
+  return { ...base2, valore: v.valore, sub: v.sub, tono: v.tono ?? null };
+}
+function statoTheCore({ tc, conf }) {
+  if (!conf?.completa) return "Incolla l'indirizzo della funzione e la chiave generata in TheCore (Impostazioni \u2192 Preferenze \u2192 Stream Deck).";
+  if (!tc) return "In lettura\u2026";
+  if (tc.err === "chiave") return "TheCore ha rifiutato la chiave: \xE8 stata rigenerata o revocata, o il tuo ruolo non la pu\xF2 pi\xF9 usare.";
+  if (tc.err === "stagione") return "Collegato, ma in TheCore non c'\xE8 una stagione attiva.";
+  if (tc.err) return `Non raggiungibile (${MESSAGGIO_ERRORE[tc.err] ?? tc.err})${tc.dati ? `: i numeri sono delle ${ora2(tc.okAt ?? tc.at)}` : ""}.`;
+  if (!tc.dati) return "In lettura\u2026";
+  return `Collegato \xB7 stagione ${tc.dati.stagione.nome ?? stagioneBreve(tc.dati.stagione.codice)} \xB7 ${ora2(tc.at)}`;
+}
 
 // src/domande.js
 var SLOT = { "approve-deny": 0, "approve-always": 1, "approve-allow": 2 };
@@ -4673,7 +5160,12 @@ var C = {
     focus: "#7fbbbf",
     project: "#bbb08c",
     prompt: "#d7a4a6",
-    custom: "#94b4d4"
+    custom: "#94b4d4",
+    // La terza pagina (fork TecNicorico): stessa luminosità e croma delle altre
+    // (OKLCH L 0.76, C 0.055), nei due buchi più larghi della ruota — 275° fra custom
+    // (249°) e chat (302°), 122° fra project (93°) e code (152°). 8.4:1 e 8.6:1 sul fondo.
+    posta: "#a6afd5",
+    thecore: "#abb790"
   },
   ok: "#4ade80",
   warn: "#fbbf24",
@@ -4751,7 +5243,13 @@ var GLYPHS = {
   plug: ["M9 3 v4.5", "M15 3 v4.5", "M6.5 7.5 h11 v3 a5.5 5.5 0 0 1 -11 0 z", "M12 16 v5"],
   arrowR: ["M4.5 12 h15", "M13.5 6 l6 6 -6 6"],
   arrowL: ["M19.5 12 h-15", "M10.5 6 l-6 6 6 6"],
-  hold: ["M12 12 m-9.5 0 a9.5 9.5 0 1 0 19 0 a9.5 9.5 0 1 0 -19 0", "M7.5 12.5 l3 3 6 -7"]
+  hold: ["M12 12 m-9.5 0 a9.5 9.5 0 1 0 19 0 a9.5 9.5 0 1 0 -19 0", "M7.5 12.5 l3 3 6 -7"],
+  // La terza pagina: la posta e i gruppi di metriche di TheCore.
+  posta: ["M3.5 6 h17 v12 h-17 z", "M3.5 6.5 L12 13 L20.5 6.5"],
+  euro: ["M17.5 7 A6.5 6.5 0 1 0 17.5 17", "M4.5 10.5 h9", "M4.5 13.5 h9"],
+  scuola: ["M3 10 L12 4.5 L21 10", "M5 10 v9", "M19 10 v9", "M3 19.5 h18", "M10 19.5 v-5 h4 v5"],
+  persone: ["M9 8.5 m-3.5 0 a3.5 3.5 0 1 0 7 0 a3.5 3.5 0 1 0 -7 0", "M2.5 20 a6.5 6.5 0 0 1 13 0", "M16 5.5 a3 3 0 0 1 0 6", "M18 14 a5.5 5.5 0 0 1 3.5 5.5"],
+  battito: ["M2.5 12.5 h4.5 l2.5 -6 l4 11 l2.5 -5 h5.5"]
 };
 function glyph(name, x, y, size, col, sw = 2.6) {
   const s = size / 24;
@@ -4873,6 +5371,33 @@ function actionKey(glyphName, title, label, sub) {
     ${actionHead(glyphName, title, id)}
     ${line(72, 92, 128, 24, 700, C.text, label)}
     ${foot(sub)}`);
+}
+var TONI = { attenzione: C.warn, guasto: C.bad };
+var cornice = (tono) => tono === "guasto" ? tintFrame(C.bad, false) : "";
+var SPENTI = /* @__PURE__ */ new Set(["0", "\u2014", "\u2026", "--", "ok"]);
+function numeroTerzaPagina(valore) {
+  const v = String(valore);
+  return line(72, 94, 124, 50, 700, SPENTI.has(v) ? C.dim : C.text, v, "middle", "", 20);
+}
+function postaKey(etichetta2, valore, sub, tono = null) {
+  const id = C.ident.posta;
+  const tinta = TONI[tono] ?? null;
+  return svgWrap(`
+    ${cornice(tono)}
+    ${band.cap(id)}
+    ${actionHead("posta", etichetta2, id)}
+    ${numeroTerzaPagina(valore)}
+    ${foot(sub, tinta ?? C.dim)}`);
+}
+function thecoreKey(glifo, titolo, valore, sub, tono = null, apre = true) {
+  const id = C.ident.thecore;
+  const tinta = TONI[tono] ?? null;
+  const testa = apre ? band.cap(id) + actionHead(glifo, titolo, id) : header(titolo);
+  return svgWrap(`
+    ${cornice(tono)}
+    ${testa}
+    ${numeroTerzaPagina(valore)}
+    ${foot(sub, tinta ?? C.dim)}`);
 }
 var GLYPH_FOR = { PROJECT: "project", FOCUS: "focus", PROMPT: "prompt", CLAUDE: "custom" };
 function labelKey(title, label, sub, tint = null, strong = false) {
@@ -4998,9 +5523,9 @@ function targetIntero(req) {
   if (t === "Bash" && i.command) return String(i.command).replace(/\s+/g, " ").trim();
   return describeRequest(req).target;
 }
-function opzioneKey(numero, intestazione, label, sub, phase = null, cloud = false) {
+function opzioneKey(numero2, intestazione, label, sub, phase = null, cloud = false) {
   return grandeKey({
-    numero,
+    numero: numero2,
     colIcona: C.ask,
     tinta: C.ask,
     forte: true,
@@ -5010,10 +5535,10 @@ function opzioneKey(numero, intestazione, label, sub, phase = null, cloud = fals
     piede: String(intestazione || "domanda").toUpperCase() + (sub ? ` ${sub}` : "")
   });
 }
-function sceltaKey(numero, label, scelta, intestazione, cloud = false, phase = null) {
+function sceltaKey(numero2, label, scelta, intestazione, cloud = false, phase = null) {
   return grandeKey({
     casella: !!scelta,
-    numero,
+    numero: numero2,
     colIcona: C.ask,
     tinta: C.ask,
     forte: !!scelta,
@@ -5228,7 +5753,7 @@ function sessionEta(state2, now) {
   const hh = Math.floor(msLeft / 36e5), mm = Math.round(msLeft % 36e5 / 6e4);
   return hh > 0 ? `cap in ~${hh}h ${mm}m` : `cap in ~${mm}m`;
 }
-var TASTI_CON_SLOT = /* @__PURE__ */ new Set(["usage-session", "usage-weekly", "usage-model", "burn-rate", "today", "usage-meter", "sessions"]);
+var TASTI_CON_SLOT = /* @__PURE__ */ new Set(["usage-session", "usage-weekly", "usage-model", "burn-rate", "today", "usage-meter", "sessions", "thecore"]);
 var SLOT_VALIDI = /* @__PURE__ */ new Set(["approve-deny", "approve-always", "approve-allow"]);
 function slotDi(kind, settings) {
   const s = settings?.slot;
@@ -5404,6 +5929,19 @@ function viewFor(kind, env) {
       const corrente2 = richiestaCorrente(state2.approveQueue, state2.scelta);
       return img(statusKey(path2.basename(b.cwd ?? "") || "claude", st, blocked.length, why + (waited ? " \xB7 " + waited : ""), sessionWhere(b), fresh ? animPhase2 : null, titoloSessione(b), !!corrente2 && corrente2.sessionId === b.sessionId));
     }
+    case "posta": {
+      const email = normEmail(settings.email);
+      const v = vistaPosta({
+        settings,
+        rec: email ? state2.posta?.get(chiaveLettura(email, modoDi(settings))) : null,
+        haPassword: !!passwordDi(state2.globalSettings, email)
+      });
+      return img(postaKey(v.titolo, v.valore, v.sub, v.tono));
+    }
+    case "thecore": {
+      const v = vistaTheCore({ settings, tc: state2.thecore, conf: confTheCore(state2.globalSettings) });
+      return img(thecoreKey(v.glifo, v.titolo, v.valore, v.sub, v.tono, !!v.pagina));
+    }
     case "approve-allow":
     case "approve-always":
     case "approve-deny":
@@ -5543,6 +6081,10 @@ var state = {
   // null = la richiesta più vecchia. Vedi richiestaCorrente in approve.js.
   scelta: null,
   relay: { ok: false, err: null, at: 0, errori: 0, sessioni: 0 },
+  // La terza pagina. posta: "<email>|<modo>" -> { n, messaggi, at, okAt, err, impronta }
+  // (src/posta.js); thecore: { dati, at, okAt, err } (src/thecore.js).
+  posta: /* @__PURE__ */ new Map(),
+  thecore: null,
   lastHeadChangeAt: 0,
   globalSettings: {},
   pluginUUID: null
@@ -6530,6 +7072,24 @@ function onKeyDown(context, kind) {
       if (!s.command) return showAlert(context);
       return act(context, platform.runCustom(s.command));
     }
+    case "posta": {
+      const v = views.get(context);
+      const email = normEmail(v?.settings?.email);
+      if (!email) return showAlert(context);
+      const chiave = chiaveLettura(email, modoDi(v.settings));
+      setTimeout(() => pollPosta({ subito: chiave }), 45e3);
+      return act(context, platform.openUrl(urlGmail(email)));
+    }
+    case "thecore": {
+      const m = METRICHE[metricaDi(views.get(context)?.settings)];
+      if (!m.pagina) {
+        pollTheCore(true);
+        return;
+      }
+      const url = urlPagina(confTheCore(state.globalSettings).app, m.pagina);
+      if (!url) return showAlert(context);
+      return act(context, platform.openUrl(url));
+    }
     case "launch":
       return act(context, platform.launchDesktop());
     case "quick-chat": {
@@ -6655,8 +7215,8 @@ function iniziaPressioneLunga(context, req) {
   annullaPressione(context);
   const timer = setTimeout(() => {
     pressioni.delete(context);
-    const ora = corrente();
-    if (!ora || ora.id !== req.id) return showAlert(context);
+    const ora3 = corrente();
+    if (!ora3 || ora3.id !== req.id) return showAlert(context);
     rispondi(req.id, decisionBody("allow", req), "allow (pressione lunga)");
   }, LUNGO_MS);
   pressioni.set(context, { timer, reqId: req.id });
@@ -6791,6 +7351,80 @@ async function inviaDecisione(id, decisione) {
   }
   programmaRelay(300);
 }
+var postaInCorso = /* @__PURE__ */ new Set();
+var impronta = (s) => createHash("sha256").update(String(s)).digest("hex").slice(0, 16);
+async function pollPosta({ subito = null } = {}) {
+  const now = Date.now();
+  const lavori = caselleDaLeggere(views.values(), state.globalSettings).filter((c) => {
+    if (postaInCorso.has(c.chiave)) return false;
+    const rec = state.posta.get(c.chiave);
+    if (subito === c.chiave && rec?.err !== "credenziali") return true;
+    return now >= prossimaLettura(rec, now, impronta(c.pass));
+  });
+  if (!lavori.length) return;
+  await Promise.all(lavori.map(async (c) => {
+    postaInCorso.add(c.chiave);
+    const imp = impronta(c.pass);
+    const prima = state.posta.get(c.chiave);
+    try {
+      const r = await contaNonLette({ user: c.email, pass: c.pass, modo: c.modo });
+      const t = Date.now();
+      state.posta.set(c.chiave, { n: r.n, messaggi: r.messaggi, at: t, okAt: t, err: null, impronta: imp });
+    } catch (e) {
+      const tipo = e?.tipo ?? "rete";
+      if (prima?.err !== tipo) log(`posta: ${c.email} (${c.modo}) non letta: ${tipo} ${String(e?.message ?? "")}`);
+      const tieni = tipo !== "credenziali" && prima?.impronta === imp && prima?.n != null;
+      state.posta.set(c.chiave, {
+        n: tieni ? prima.n : null,
+        messaggi: tieni ? prima.messaggi : null,
+        at: Date.now(),
+        okAt: tieni ? prima.okAt : null,
+        err: tipo,
+        impronta: imp
+      });
+    } finally {
+      postaInCorso.delete(c.chiave);
+    }
+  }));
+  renderAll(["posta"]);
+}
+var thecoreInCorso = false;
+var thecoreFirma = "";
+async function pollTheCore(forza = false) {
+  if (!forza && ![...views.values()].some((v) => v.kind === "thecore")) return;
+  const conf = confTheCore(state.globalSettings);
+  if (!conf.completa) {
+    if (state.thecore) {
+      state.thecore = null;
+      thecoreFirma = "";
+      renderAll(["thecore"]);
+    }
+    return;
+  }
+  const firma = conf.url + "|" + impronta(conf.chiave);
+  if (firma !== thecoreFirma) {
+    thecoreFirma = firma;
+    state.thecore = null;
+    forza = true;
+  }
+  const tc = state.thecore;
+  if (!forza && tc && Date.now() - tc.at < (tc.err ? RITARDO_ERRORE_THECORE_MS : INTERVALLO_THECORE_MS)) return;
+  if (thecoreInCorso) return;
+  thecoreInCorso = true;
+  try {
+    const dati = await leggiTheCore(conf);
+    const t = Date.now();
+    state.thecore = { dati, at: t, okAt: t, err: null };
+  } catch (e) {
+    const tipo = e?.tipo ?? "rete";
+    if (state.thecore?.err !== tipo) log(`thecore: lettura non riuscita: ${tipo} ${String(e?.message ?? "")}`);
+    const tieni = tipo !== "chiave" && tipo !== "stagione" && state.thecore?.dati ? state.thecore : null;
+    state.thecore = { dati: tieni?.dati ?? null, at: Date.now(), okAt: tieni?.okAt ?? null, err: tipo };
+  } finally {
+    thecoreInCorso = false;
+  }
+  renderAll(["thecore"]);
+}
 if (process.argv.includes("--selftest")) {
   (async () => {
     log("selftest: polling usage\u2026");
@@ -6896,6 +7530,8 @@ if (process.argv.includes("--selftest")) {
       setTitle(context);
       render(context, kindOf(action));
       if (kindOf(action) === "usage-meter" || GAUGE_WINDOW[kindOf(action)]) pollUsageMeter();
+      if (kindOf(action) === "posta") pollPosta();
+      if (kindOf(action) === "thecore") pollTheCore();
     } else if (event === "willDisappear") {
       const wasApproveKey = faDaApprovazione(views.get(context));
       views.delete(context);
@@ -6918,6 +7554,7 @@ if (process.argv.includes("--selftest")) {
         v.settings = msg.payload?.settings ?? {};
         render(context, v.kind);
         if (v.kind === "usage-meter" || GAUGE_WINDOW[v.kind]) pollUsageMeter();
+        if (v.kind === "posta") pollPosta();
       }
     } else if (event === "didReceiveGlobalSettings") {
       state.globalSettings = msg.payload?.settings ?? {};
@@ -6926,9 +7563,25 @@ if (process.argv.includes("--selftest")) {
       ensureHookServer();
       programmaRelay(200);
       renderApproveAll();
+      renderAll(["posta", "thecore"]);
+      pollPosta();
+      pollTheCore();
     } else if (event === "sendToPlugin" && action) {
       if (msg.payload?.cmd === "getModels") {
         send({ event: "sendToPropertyInspector", context, payload: { models: (state.usage?.models ?? []).map((m) => m.name) } });
+      }
+      if (msg.payload?.cmd === "getPosta") {
+        const settings = views.get(context)?.settings ?? {};
+        const email = normEmail(settings.email);
+        const rec = email ? state.posta.get(chiaveLettura(email, modoDi(settings))) : null;
+        send({ event: "sendToPropertyInspector", context, payload: {
+          posta: statoPosta({ settings, rec, haPassword: !!passwordDi(state.globalSettings, email) })
+        } });
+      }
+      if (msg.payload?.cmd === "getTheCore") {
+        send({ event: "sendToPropertyInspector", context, payload: {
+          thecore: statoTheCore({ tc: state.thecore, conf: confTheCore(state.globalSettings) })
+        } });
       }
       if (msg.payload?.cmd === "getRelay") {
         const { ok, err, sessioni } = state.relay;
@@ -6956,6 +7609,8 @@ if (process.argv.includes("--selftest")) {
   pollBurn();
   setInterval(pollBurn, 6e4);
   setInterval(pollUsageMeter, 6e4);
+  setInterval(pollPosta, 15e3);
+  setInterval(pollTheCore, 3e4);
   setInterval(() => {
     animPhase = (animPhase + 1) % 3;
     const kinds = [];

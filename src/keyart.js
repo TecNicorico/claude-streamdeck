@@ -46,6 +46,10 @@ const C = {
   ident: {
     code: "#96b99e", launch: "#cbab8f", chat: "#b8abce", web: "#cda5bd",
     focus: "#7fbbbf", project: "#bbb08c", prompt: "#d7a4a6", custom: "#94b4d4",
+    // La terza pagina (fork TecNicorico): stessa luminosità e croma delle altre
+    // (OKLCH L 0.76, C 0.055), nei due buchi più larghi della ruota — 275° fra custom
+    // (249°) e chat (302°), 122° fra project (93°) e code (152°). 8.4:1 e 8.6:1 sul fondo.
+    posta: "#a6afd5", thecore: "#abb790",
   },
   ok: "#4ade80",
   warn: "#fbbf24",
@@ -152,6 +156,12 @@ const GLYPHS = {
   arrowR: ["M4.5 12 h15", "M13.5 6 l6 6 -6 6"],
   arrowL: ["M19.5 12 h-15", "M10.5 6 l-6 6 6 6"],
   hold: ["M12 12 m-9.5 0 a9.5 9.5 0 1 0 19 0 a9.5 9.5 0 1 0 -19 0", "M7.5 12.5 l3 3 6 -7"],
+  // La terza pagina: la posta e i gruppi di metriche di TheCore.
+  posta: ["M3.5 6 h17 v12 h-17 z", "M3.5 6.5 L12 13 L20.5 6.5"],
+  euro: ["M17.5 7 A6.5 6.5 0 1 0 17.5 17", "M4.5 10.5 h9", "M4.5 13.5 h9"],
+  scuola: ["M3 10 L12 4.5 L21 10", "M5 10 v9", "M19 10 v9", "M3 19.5 h18", "M10 19.5 v-5 h4 v5"],
+  persone: ["M9 8.5 m-3.5 0 a3.5 3.5 0 1 0 7 0 a3.5 3.5 0 1 0 -7 0", "M2.5 20 a6.5 6.5 0 0 1 13 0", "M16 5.5 a3 3 0 0 1 0 6", "M18 14 a5.5 5.5 0 0 1 3.5 5.5"],
+  battito: ["M2.5 12.5 h4.5 l2.5 -6 l4 11 l2.5 -5 h5.5"],
 };
 
 // A standalone 72x72 icon for the Stream Deck action list, drawn from the same glyph
@@ -362,6 +372,54 @@ function actionKey(glyphName, title, label, sub) {
     ${actionHead(glyphName, title, id)}
     ${line(72, 92, 128, 24, 700, C.text, label)}
     ${foot(sub)}`);
+}
+
+// ================= LA TERZA PAGINA — posta e TheCore =================
+// Un numero grande in bone, come i tasti dei consumi; il colore resta allo stato, in
+// due pesi diversi:
+//   attenzione  c'è da fare qualcosa (candidature da scrutinare, PLAO da controllare):
+//               solo la riga sotto in ambra. Su questa pagina è la normalità di ogni
+//               giorno, e cinque cornici accese insieme — provate sull'anteprima —
+//               facevano sembrare un allarme una mattina qualunque;
+//   guasto      qualcosa si è rotto (job falliti, un fornitore con un problema):
+//               anche la cornice, sottile e rossa. La cornice FORTE resta di «una
+//               sessione aspetta te», come in tutto il resto del plugin.
+// Un valore vuoto («0», «—», «…», «--», «ok») è spento: un tasto calmo deve sembrare calmo.
+const TONI = { attenzione: C.warn, guasto: C.bad };
+const cornice = (tono) => (tono === "guasto" ? tintFrame(C.bad, false) : "");
+const SPENTI = new Set(["0", "—", "…", "--", "ok"]);
+function numeroTerzaPagina(valore) {
+  const v = String(valore);
+  return line(72, 94, 124, 50, 700, SPENTI.has(v) ? C.dim : C.text, v, "middle", "", 20);
+}
+
+// Una casella di posta: premuto apre Gmail, quindi banda e glifo (la pressione
+// lascia il deck).
+function postaKey(etichetta, valore, sub, tono = null) {
+  const id = C.ident.posta;
+  const tinta = TONI[tono] ?? null;
+  return svgWrap(`
+    ${cornice(tono)}
+    ${band.cap(id)}
+    ${actionHead("posta", etichetta, id)}
+    ${numeroTerzaPagina(valore)}
+    ${foot(sub, tinta ?? C.dim)}`);
+}
+
+// Una metrica di TheCore. Con una pagina da aprire è un tasto d'azione (banda e
+// glifo); senza (l'outbox) la pressione rilegge soltanto, quindi niente banda:
+// la regola 2 qui sopra.
+function thecoreKey(glifo, titolo, valore, sub, tono = null, apre = true) {
+  const id = C.ident.thecore;
+  const tinta = TONI[tono] ?? null;
+  const testa = apre
+    ? band.cap(id) + actionHead(glifo, titolo, id)
+    : header(titolo);
+  return svgWrap(`
+    ${cornice(tono)}
+    ${testa}
+    ${numeroTerzaPagina(valore)}
+    ${foot(sub, tinta ?? C.dim)}`);
 }
 
 // Glyph is derived from the header so the call signature stays close to the original.
@@ -694,5 +752,5 @@ export {
   gaugeKey, linesKey, bigCountKey, burnKey, usageMeterKey, labelKey, actionKey,
   STATUS_LOOK, statusKey, APPROVE_LOOK, approveKey, fmtNum,
   aCapo, grandeKey, decisioneKey, opzioneKey, paginaKey, domandaKey, infoKey, iconaStrumento, SPENTO, selettoreKey,
-  sceltaKey, confermaKey, vuotoKey,
+  sceltaKey, confermaKey, vuotoKey, postaKey, thecoreKey,
 };

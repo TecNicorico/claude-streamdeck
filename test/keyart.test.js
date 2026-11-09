@@ -213,3 +213,31 @@ test("aCapo non perde la fine senza dirlo", () => {
   assert.equal(tre.length, 3);
   assert.ok(tre[2].endsWith("…"));
 });
+
+test("i tasti della terza pagina non escono dal riquadro, con i numeri più lunghi", async () => {
+  const { postaKey, thecoreKey } = await import("../src/keyart.js");
+  const { METRICHE, vistaTheCore } = await import("../src/thecore.js");
+  for (const valore of ["0", "7", "999+", "!", "—", "…", "--"]) {
+    for (const sub of ["da leggere", "offline · 23:59", "password rifiutata", "imposta l'indirizzo"]) {
+      for (const tono of [null, "attenzione"]) {
+        assertInsideBox(postaKey("enrico.malachin.lavoro", valore, sub, tono), `posta ${valore} ${sub}`);
+      }
+    }
+  }
+  // Ogni metrica con i numeri più grandi che una stagione può dare.
+  const grande = {
+    versione: 1,
+    stagione: { id: 2, codice: "2026-2027", nome: "Stagione 2026/2027", precedente: "2025-2026", sfasamentoGiorni: 365 },
+    vendite: { fatturato: 12_345_678.9, fatturatoOggi: 98_765.4, fatturatoAnnoScorso: 1, ordiniOggi: 12_345, ordiniIeri: 9_999, ordiniAnnoScorsoOggi: 1, ufficializzate: 4_321 },
+    directory: { raggiunte: 4_253, raggiunteAnnoScorso: 1, daAssegnare: 1_234, competitor: 321, richieste: 1_234 },
+    hiring: { daScrutinare: 12_345, arrivateOggi: 1_234, risEletti: 3_000, documentiDaVerificare: 1_234, elettiSenzaDocumento: 1_234 },
+    operativo: { avvisiRossi: 12_345, avvisiGialli: 12_345, jobFalliti: 12_345, jobInRitardo: 12_345, plaoFirmate: 1_234, plaoDaFirmare: 1_234, fornitoriProblema: 1_234 },
+  };
+  const conf = { completa: true };
+  for (const metrica of Object.keys(METRICHE)) {
+    for (const tc of [{ dati: grande, at: 0, err: null }, { dati: grande, at: 0, okAt: 0, err: "rete" }, { dati: null, at: 0, err: "chiave" }, null]) {
+      const v = vistaTheCore({ settings: { metrica }, tc, conf });
+      assertInsideBox(thecoreKey(v.glifo, v.titolo, v.valore, v.sub, v.tono, !!v.pagina), `thecore ${metrica} ${tc?.err ?? "ok"}`);
+    }
+  }
+});

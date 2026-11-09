@@ -84,7 +84,40 @@ const FIELDS = {
     { key: "label", type: "text", label: "Button label (optional)" },
     INSTALL_FIELD,
   ],
+  // La terza pagina (fork TecNicorico).
+  "dev.tapparello.agent-vitals.posta": [
+    { key: "email", type: "text", label: "Indirizzo Gmail o Google Workspace" },
+    { key: "_password", type: "postaPassword", label: "Password per le app di questo indirizzo" },
+    { key: "modo", type: "select", label: "Cosa contare", default: "principale", options: [
+      { value: "principale", label: "Principale, come Gmail (conversazioni)" },
+      { value: "tutta", label: "Tutta la posta in arrivo (messaggi)" },
+    ] },
+    { key: "label", type: "text", label: "Etichetta (vuoto = la parte prima della @)" },
+  ],
+  "dev.tapparello.agent-vitals.thecore": [
+    { key: "metrica", type: "metrica", label: "Che numero mostra" },
+    SLOT_FIELD,
+  ],
 };
+// Lo stesso elenco di METRICHE in src/thecore.js, nello stesso ordine: il pannello
+// non importa moduli, e test/thecore.test.js confronta i due.
+const METRICHE_PI = [
+  ["fatturato", "Vendite", "Fatturato della stagione"],
+  ["ordini_oggi", "Vendite", "Ordini di oggi"],
+  ["ufficializzate", "Vendite", "Scuole ufficializzate"],
+  ["raggiunte", "Directory", "Scuole raggiunte"],
+  ["da_assegnare", "Directory", "Scuole senza sales"],
+  ["richieste", "Directory", "Richieste dal form da assegnare"],
+  ["ris_da_scrutinare", "Hiring", "Candidature da scrutinare"],
+  ["ris_documenti", "Hiring", "Documenti da verificare"],
+  ["eletti_senza_documento", "Hiring", "Eletti senza documento"],
+  ["ris_eletti", "Hiring", "RIS eletti"],
+  ["avvisi", "Operativo", "Avvisi della Dashboard"],
+  ["job", "Operativo", "Job dell'outbox"],
+  ["plao", "Operativo", "PLAO da controllare"],
+  ["fornitori", "Operativo", "Ordini fornitori con un problema"],
+];
+const normEmail = (e) => { const t = String(e ?? "").trim().toLowerCase(); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t) ? t : ""; };
 function save() { ws.send(JSON.stringify({ event: "setSettings", context: piUuid, payload: settings })); }
 function build() {
   const form = document.getElementById("form");
@@ -146,6 +179,57 @@ function build() {
       err.style.cssText = "font-size:11px;color:#f87171;margin-top:4px;display:none";
       div.append(lab, ta, btn, note, err);
       ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd: "getInstall" } }));
+    } else if (f.type === "postaPassword") {
+      // La password NON va nelle impostazioni del tasto (finirebbe in un profilo
+      // esportato): va in quelle globali, per indirizzo, e il campo non la rimostra.
+      const l = document.createElement("label");
+      l.textContent = f.label;
+      const i = document.createElement("input");
+      i.type = "password"; i.autocomplete = "off"; i.spellcheck = false; i.id = "postaPassword";
+      const email = normEmail(settings.email);
+      const salvata = !!(email && gs.posta && gs.posta[email] && gs.posta[email].password);
+      i.placeholder = !email ? "prima scrivi l'indirizzo" : salvata ? "salvata — incolla per sostituirla" : "16 lettere, da myaccount.google.com/apppasswords";
+      i.disabled = !email || !gsReady;
+      i.onchange = () => {
+        const e = normEmail(settings.email);
+        const v = i.value.replace(/\s+/g, "");
+        if (!gsReady || !e || !v) return;
+        gs.posta = gs.posta ?? {};
+        gs.posta[e] = { password: v };
+        ws.send(JSON.stringify({ event: "setGlobalSettings", context: piUuid, payload: gs }));
+        i.value = "";
+        i.placeholder = "salvata — incolla per sostituirla";
+        setTimeout(askPosta, 4000);
+      };
+      div.append(l, i);
+      if (salvata) {
+        const via = document.createElement("button");
+        via.textContent = "Dimentica la password";
+        via.onclick = () => {
+          delete gs.posta[email];
+          ws.send(JSON.stringify({ event: "setGlobalSettings", context: piUuid, payload: gs }));
+          build();
+        };
+        div.append(via);
+      }
+      const cap = document.createElement("div"); cap.className = "cap";
+      cap.textContent = "Serve la verifica in due passaggi sull'account. La password resta su questo PC, nelle impostazioni del plugin, e non finisce in un profilo esportato.";
+      const st = document.createElement("div"); st.className = "cap"; st.id = "postaState";
+      div.append(cap, st);
+    } else if (f.type === "metrica") {
+      const l = document.createElement("label");
+      l.textContent = f.label;
+      const sel = document.createElement("select");
+      const gruppi = new Map();
+      for (const [id, gruppo, nome] of METRICHE_PI) {
+        if (!gruppi.has(gruppo)) { const g = document.createElement("optgroup"); g.label = gruppo; gruppi.set(gruppo, g); sel.append(g); }
+        const o = document.createElement("option"); o.value = id; o.textContent = nome;
+        gruppi.get(gruppo).append(o);
+      }
+      sel.value = settings[f.key] ?? METRICHE_PI[0][0];
+      if (sel.selectedIndex < 0) sel.value = METRICHE_PI[0][0];
+      sel.onchange = () => { settings[f.key] = sel.value; save(); };
+      div.append(l, sel);
     } else if (f.type === "checkbox") {
       const l = document.createElement("label");
       l.className = "chk";
@@ -184,6 +268,53 @@ function build() {
   }
   if (action === "dev.tapparello.agent-vitals.usage-meter") buildRates();
   if (RELAY_ACTIONS.includes(action)) buildRelay();
+  if (action === THECORE_ACTION) buildTheCore();
+  if (action === POSTA_ACTION) {
+    // Cambiato l'indirizzo, il campo della password è di un'altra casella.
+    const em = [...document.querySelectorAll("#form input[type=text]")][0];
+    if (em) em.onchange = () => { build(); setTimeout(askPosta, 1500); };
+    askPosta();
+  }
+}
+const POSTA_ACTION = "dev.tapparello.agent-vitals.posta";
+const THECORE_ACTION = "dev.tapparello.agent-vitals.thecore";
+const GS_ACTIONS = ["dev.tapparello.agent-vitals.usage-meter", POSTA_ACTION, THECORE_ACTION];
+function askPosta() { if (ws && action === POSTA_ACTION) ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd: "getPosta" } })); }
+function askTheCore() { ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd: "getTheCore" } })); }
+// TheCore: impostazioni condivise da tutti i tasti TheCore (global settings), come
+// quelle del relay. La chiave si genera in TheCore e si vede una volta sola.
+const THECORE_FIELDS = [
+  { key: "thecoreUrl", label: "Indirizzo della funzione (https://…/functions/v1/deck-metriche)", type: "text" },
+  { key: "thecoreKey", label: "Chiave dello Stream Deck (szd_…)", type: "password" },
+  { key: "thecoreApp", label: "Indirizzo di TheCore (dove la pressione apre le pagine)", type: "text" },
+];
+let thecoreInfo = null;
+function buildTheCore() {
+  let box = document.getElementById("thecore");
+  if (!box) { box = document.createElement("div"); box.id = "thecore"; document.getElementById("form").append(box); }
+  box.innerHTML = "";
+  const h = document.createElement("div"); h.className = "rateshead"; h.textContent = "TheCore — condivise"; box.append(h);
+  for (const f of THECORE_FIELDS) {
+    const div = document.createElement("div"); div.className = "item";
+    const l = document.createElement("label"); l.textContent = f.label;
+    const i = document.createElement("input"); i.type = f.type; i.autocomplete = "off"; i.spellcheck = false;
+    i.value = gs[f.key] ?? "";
+    i.onchange = () => {
+      if (!gsReady) return;
+      const v = i.value.trim();
+      if (v) gs[f.key] = v; else delete gs[f.key];
+      ws.send(JSON.stringify({ event: "setGlobalSettings", context: piUuid, payload: gs }));
+      setTimeout(askTheCore, 3000);
+    };
+    div.append(l, i);
+    box.append(div);
+  }
+  const st = document.createElement("div"); st.className = "cap"; st.id = "thecoreState";
+  st.textContent = thecoreInfo ?? "";
+  box.append(st);
+  const cap = document.createElement("div"); cap.className = "cap";
+  cap.textContent = "Le tre cose si copiano da TheCore: Impostazioni → Preferenze → Stream Deck → «Genera la chiave». La chiave apre i numeri di tutta la stagione: trattala come una password.";
+  box.append(cap);
 }
 // Relay e Supabase: impostazioni condivise da tutti i tasti (global settings), come le
 // tariffe del tasto Usage. La chiave è quella del DECK, mai quella del cloud.
@@ -266,10 +397,11 @@ function connectElgatoStreamDeckSocket(port, uuid, evt, info, actionInfo) {
     if (action === "dev.tapparello.agent-vitals.usage-model") {
       ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd: "getModels" } }));
     }
-    if (action === "dev.tapparello.agent-vitals.usage-meter" || RELAY_ACTIONS.includes(action)) {
+    if (GS_ACTIONS.includes(action) || RELAY_ACTIONS.includes(action)) {
       ws.send(JSON.stringify({ event: "getGlobalSettings", context: piUuid }));
     }
     if (RELAY_ACTIONS.includes(action)) askRelay();
+    if (action === THECORE_ACTION) askTheCore();
   };
   ws.onmessage = (e) => {
     let m;
@@ -279,7 +411,18 @@ function connectElgatoStreamDeckSocket(port, uuid, evt, info, actionInfo) {
       gsReady = true;
       if (action === "dev.tapparello.agent-vitals.usage-meter") buildRates();
       if (RELAY_ACTIONS.includes(action)) buildRelay();
+      if (action === POSTA_ACTION) build();
+      if (action === THECORE_ACTION) buildTheCore();
       return;
+    }
+    if (m.event === "sendToPropertyInspector" && typeof m.payload?.posta === "string") {
+      const st = document.getElementById("postaState");
+      if (st) st.textContent = m.payload.posta;
+    }
+    if (m.event === "sendToPropertyInspector" && typeof m.payload?.thecore === "string") {
+      thecoreInfo = m.payload.thecore;
+      const st = document.getElementById("thecoreState");
+      if (st) st.textContent = thecoreInfo;
     }
     if (m.event === "sendToPropertyInspector" && m.payload?.relay) {
       relayInfo = m.payload.relay;

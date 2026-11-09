@@ -71,6 +71,16 @@ const ROWS = [
     ["just denied", K.approveKey("approve-always", WEBFETCH, { denied: "just denied" })],
     ["hook error", K.approveKey("approve-deny", null, { err: "port in use" })],
   ]],
+  ["La terza pagina — posta e TheCore: ambra c'è da fare, rosso si è rotto", [
+    ["posta", K.postaKey("personale", "7", "da leggere")],
+    ["posta, letta", K.postaKey("lavoro", "0", "tutto letto")],
+    ["password?", K.postaKey("lavoro", "!", "password rifiutata", "attenzione")],
+    ["fatturato", K.thecoreKey("euro", "fatturato", "€ 184k", "▲ 14% vs 25/26")],
+    ["senza sales", K.thecoreKey("scuola", "senza sales", "14", "2 competitor", "attenzione")],
+    ["candidature", K.thecoreKey("persone", "candidature", "23", "da scrutinare · +6", "attenzione")],
+    ["outbox", K.thecoreKey("battito", "outbox", "3", "2 falliti · 1 fermo", "guasto", false)],
+    ["fornitori", K.thecoreKey("alert", "fornitori", "0", "con un problema")],
+  ]],
 ];
 
 const KEY = 144, GAP = 18, PAD = 34, CAPH = 22, HEADH = 34, ROWGAP = 30;

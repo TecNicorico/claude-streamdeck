@@ -41,6 +41,9 @@ const ICONS = {
   focus: ["focus", C.ident.focus],
   prompt: ["prompt", C.ident.prompt],
   custom: ["custom", C.ident.custom],
+  // la terza pagina (fork TecNicorico)
+  posta: ["posta", C.ident.posta],
+  thecore: ["scuola", C.ident.thecore],
   // approver
   status: ["dot", C.text],
   waiting: ["clock", C.text],

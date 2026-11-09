@@ -11,7 +11,10 @@ import { fileURLToPath } from "node:url";
 import { escapeAppleScript, parseHotkey, hotkeyClause, classifyCustomCommand, parseKeychainToken, parsePsTree, hostAppForPid, focusStrategyForBundle, terminalFocusScript, parseProcStarts } from "./osa.js";
 import { windowStartMs, parseRequests, mergeById, aggregate, aggregateByModel, budgetPct, localDay, newDayCounts, foldDayChunk, dayCountsTotals } from "./usage.js";
 import { resolveStatusKey, statusEntry, autoSlot, sessionState, blockedSessions, sessionSig, transcriptPathFor, pidLooksRecycled } from "./status.js";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
+import { contaNonLette } from "./imap.js";
+import { caselleDaLeggere, prossimaLettura, normEmail, modoDi, passwordDi, chiaveLettura, urlGmail, statoPosta } from "./posta.js";
+import { confTheCore, leggiTheCore, metricaDi, METRICHE, urlPagina, statoTheCore, INTERVALLO_THECORE_MS, RITARDO_ERRORE_THECORE_MS } from "./thecore.js";
 import {
   decisionBody, answerBody, pressDecision, isQuestion, richiestaCorrente, sessioniInAttesa, prossimaScelta,
   enqueue, approvableDepth, pendingBySession, resolve, expiredIds, staleIds, seedBaselines, hookFragment,
@@ -110,6 +113,10 @@ const state = {
   // null = la richiesta più vecchia. Vedi richiestaCorrente in approve.js.
   scelta: null,
   relay: { ok: false, err: null, at: 0, errori: 0, sessioni: 0 },
+  // La terza pagina. posta: "<email>|<modo>" -> { n, messaggi, at, okAt, err, impronta }
+  // (src/posta.js); thecore: { dati, at, okAt, err } (src/thecore.js).
+  posta: new Map(),
+  thecore: null,
   lastHeadChangeAt: 0,
   globalSettings: {},
   pluginUUID: null,
@@ -1259,6 +1266,24 @@ function onKeyDown(context, kind) {
       if (!s.command) return showAlert(context);
       return act(context, platform.runCustom(s.command));
     }
+    case "posta": {
+      const v = views.get(context);
+      const email = normEmail(v?.settings?.email);
+      if (!email) return showAlert(context);
+      // Letta la posta in Gmail il numero cambia: si rilegge fra poco, senza
+      // aspettare il giro dei due minuti.
+      const chiave = chiaveLettura(email, modoDi(v.settings));
+      setTimeout(() => pollPosta({ subito: chiave }), 45_000);
+      return act(context, platform.openUrl(urlGmail(email)));
+    }
+    case "thecore": {
+      const m = METRICHE[metricaDi(views.get(context)?.settings)];
+      // Senza una pagina (l'outbox) la pressione rilegge.
+      if (!m.pagina) { pollTheCore(true); return; }
+      const url = urlPagina(confTheCore(state.globalSettings).app, m.pagina);
+      if (!url) return showAlert(context);
+      return act(context, platform.openUrl(url));
+    }
     case "launch": return act(context, platform.launchDesktop());
     case "quick-chat": {
       const s = views.get(context)?.settings ?? {};
@@ -1554,6 +1579,82 @@ async function inviaDecisione(id, decisione) {
   programmaRelay(300);
 }
 
+// ---------- la terza pagina: posta e TheCore ----------
+// Si legge solo ciò che un tasto visibile chiede: Stream Deck manda willAppear per i
+// soli tasti della pagina aperta, quindi la posta non si legge mentre si guarda la
+// pagina di Claude. Tornati sulla pagina, il primo giro rilegge ciò che è vecchio.
+const postaInCorso = new Set();
+// L'impronta della password: dice se è cambiata senza tenerne una copia nello stato.
+const impronta = (s) => createHash("sha256").update(String(s)).digest("hex").slice(0, 16);
+
+async function pollPosta({ subito = null } = {}) {
+  const now = Date.now();
+  const lavori = caselleDaLeggere(views.values(), state.globalSettings).filter((c) => {
+    if (postaInCorso.has(c.chiave)) return false;
+    const rec = state.posta.get(c.chiave);
+    if (subito === c.chiave && rec?.err !== "credenziali") return true;
+    return now >= prossimaLettura(rec, now, impronta(c.pass));
+  });
+  if (!lavori.length) return;
+  await Promise.all(lavori.map(async (c) => {
+    postaInCorso.add(c.chiave);
+    const imp = impronta(c.pass);
+    const prima = state.posta.get(c.chiave);
+    try {
+      const r = await contaNonLette({ user: c.email, pass: c.pass, modo: c.modo });
+      const t = Date.now();
+      state.posta.set(c.chiave, { n: r.n, messaggi: r.messaggi, at: t, okAt: t, err: null, impronta: imp });
+    } catch (e) {
+      const tipo = e?.tipo ?? "rete";
+      if (prima?.err !== tipo) log(`posta: ${c.email} (${c.modo}) non letta: ${tipo} ${String(e?.message ?? "")}`);
+      // Un numero vecchio resta solo per un guasto di rete con la stessa password:
+      // dopo un rifiuto era il numero di una casella a cui non si accede più.
+      const tieni = tipo !== "credenziali" && prima?.impronta === imp && prima?.n != null;
+      state.posta.set(c.chiave, {
+        n: tieni ? prima.n : null, messaggi: tieni ? prima.messaggi : null,
+        at: Date.now(), okAt: tieni ? prima.okAt : null, err: tipo, impronta: imp,
+      });
+    } finally {
+      postaInCorso.delete(c.chiave);
+    }
+  }));
+  renderAll(["posta"]);
+}
+
+// Una lettura sola per tutti i tasti TheCore: devono raccontare lo stesso istante.
+let thecoreInCorso = false;
+let thecoreFirma = "";
+async function pollTheCore(forza = false) {
+  if (!forza && ![...views.values()].some((v) => v.kind === "thecore")) return;
+  const conf = confTheCore(state.globalSettings);
+  if (!conf.completa) {
+    if (state.thecore) { state.thecore = null; thecoreFirma = ""; renderAll(["thecore"]); }
+    return;
+  }
+  // Indirizzo o chiave cambiati: i numeri di prima non sono di questa configurazione.
+  const firma = conf.url + "|" + impronta(conf.chiave);
+  if (firma !== thecoreFirma) { thecoreFirma = firma; state.thecore = null; forza = true; }
+  const tc = state.thecore;
+  if (!forza && tc && Date.now() - tc.at < (tc.err ? RITARDO_ERRORE_THECORE_MS : INTERVALLO_THECORE_MS)) return;
+  if (thecoreInCorso) return;
+  thecoreInCorso = true;
+  try {
+    const dati = await leggiTheCore(conf);
+    const t = Date.now();
+    state.thecore = { dati, at: t, okAt: t, err: null };
+  } catch (e) {
+    const tipo = e?.tipo ?? "rete";
+    if (state.thecore?.err !== tipo) log(`thecore: lettura non riuscita: ${tipo} ${String(e?.message ?? "")}`);
+    // Una chiave rifiutata non tiene i numeri di prima: una chiave revocata deve
+    // smettere di mostrarli, non mostrarli fermi.
+    const tieni = tipo !== "chiave" && tipo !== "stagione" && state.thecore?.dati ? state.thecore : null;
+    state.thecore = { dati: tieni?.dati ?? null, at: Date.now(), okAt: tieni?.okAt ?? null, err: tipo };
+  } finally {
+    thecoreInCorso = false;
+  }
+  renderAll(["thecore"]);
+}
+
 // ---------- selftest mode (no Stream Deck needed) ----------
 if (process.argv.includes("--selftest")) {
   (async () => {
@@ -1643,6 +1744,8 @@ if (process.argv.includes("--selftest")) {
       setTitle(context);
       render(context, kindOf(action));
       if (kindOf(action) === "usage-meter" || GAUGE_WINDOW[kindOf(action)]) pollUsageMeter();
+      if (kindOf(action) === "posta") pollPosta();
+      if (kindOf(action) === "thecore") pollTheCore();
     } else if (event === "willDisappear") {
       const wasApproveKey = faDaApprovazione(views.get(context));
       views.delete(context);
@@ -1667,7 +1770,12 @@ if (process.argv.includes("--selftest")) {
       }
     } else if (event === "didReceiveSettings" && action) {
       const v = views.get(context);
-      if (v) { v.settings = msg.payload?.settings ?? {}; render(context, v.kind); if (v.kind === "usage-meter" || GAUGE_WINDOW[v.kind]) pollUsageMeter(); }
+      if (v) {
+        v.settings = msg.payload?.settings ?? {};
+        render(context, v.kind);
+        if (v.kind === "usage-meter" || GAUGE_WINDOW[v.kind]) pollUsageMeter();
+        if (v.kind === "posta") pollPosta();
+      }
     } else if (event === "didReceiveGlobalSettings") {
       state.globalSettings = msg.payload?.settings ?? {};
       state.rates = state.globalSettings.rates ?? {};
@@ -1675,9 +1783,25 @@ if (process.argv.includes("--selftest")) {
       ensureHookServer();
       programmaRelay(200);
       renderApproveAll();
+      renderAll(["posta", "thecore"]);
+      pollPosta();
+      pollTheCore();
     } else if (event === "sendToPlugin" && action) {
       if (msg.payload?.cmd === "getModels") {
         send({ event: "sendToPropertyInspector", context, payload: { models: (state.usage?.models ?? []).map((m) => m.name) } });
+      }
+      if (msg.payload?.cmd === "getPosta") {
+        const settings = views.get(context)?.settings ?? {};
+        const email = normEmail(settings.email);
+        const rec = email ? state.posta.get(chiaveLettura(email, modoDi(settings))) : null;
+        send({ event: "sendToPropertyInspector", context, payload: {
+          posta: statoPosta({ settings, rec, haPassword: !!passwordDi(state.globalSettings, email) }),
+        } });
+      }
+      if (msg.payload?.cmd === "getTheCore") {
+        send({ event: "sendToPropertyInspector", context, payload: {
+          thecore: statoTheCore({ tc: state.thecore, conf: confTheCore(state.globalSettings) }),
+        } });
       }
       if (msg.payload?.cmd === "getRelay") {
         const { ok, err, sessioni } = state.relay;
@@ -1701,6 +1825,9 @@ if (process.argv.includes("--selftest")) {
   pollBurn();
   setInterval(pollBurn, 60_000);
   setInterval(pollUsageMeter, 60_000);
+  // Due giri leggeri: rileggono solo ciò che è scaduto (src/posta.js, src/thecore.js).
+  setInterval(pollPosta, 15_000);
+  setInterval(pollTheCore, 30_000);
   // Animation ticker: busy-session dots + red pulse on gauges at 90%+
   setInterval(() => {
     animPhase = (animPhase + 1) % 3;

@@ -12,8 +12,10 @@ import path from "node:path";
 import {
   C, gaugeKey, linesKey, bigCountKey, burnKey, usageMeterKey, labelKey, actionKey,
   statusKey, fmtNum, aCapo, decisioneKey, opzioneKey, paginaKey, domandaKey, infoKey, iconaStrumento, selettoreKey,
-  sceltaKey, confermaKey, vuotoKey,
+  sceltaKey, confermaKey, vuotoKey, postaKey, thecoreKey,
 } from "./keyart.js";
+import { vistaPosta, passwordDi, chiaveLettura, normEmail, modoDi } from "./posta.js";
+import { vistaTheCore, confTheCore } from "./thecore.js";
 import { budgetPct, gaugeSource, familyOf } from "./usage.js";
 import {
   resolveStatusKey, statusEntry, sessionWhere, fmtShort, shortWait, sessionState,
@@ -133,7 +135,9 @@ export function sessionEta(state, now) {
 // lo dice la sua impostazione `slot`. Senza richieste torna a mostrare ciò che mostrava.
 // Solo tasti che mostrano e basta: uno che apre una finestra o un'app, cambiando faccia
 // sotto il dito, farebbe qualcosa che la persona non ha scelto.
-export const TASTI_CON_SLOT = new Set(["usage-session", "usage-weekly", "usage-model", "burn-rate", "today", "usage-meter", "sessions"]);
+// I tasti TheCore della terza pagina ci sono anche loro: mentre si guarda quella
+// pagina, una richiesta di Claude deve poter trovare una riga su cui rispondere.
+export const TASTI_CON_SLOT = new Set(["usage-session", "usage-weekly", "usage-model", "burn-rate", "today", "usage-meter", "sessions", "thecore"]);
 export const SLOT_VALIDI = new Set(["approve-deny", "approve-always", "approve-allow"]);
 export function slotDi(kind, settings) {
   const s = settings?.slot;
@@ -341,6 +345,19 @@ export function viewFor(kind, env) {
       const fresh = !since || now - since < PULSE_MS;
       const corrente = richiestaCorrente(state.approveQueue, state.scelta);
       return img(statusKey(path.basename(b.cwd ?? "") || "claude", st, blocked.length, why + (waited ? " · " + waited : ""), sessionWhere(b), fresh ? animPhase : null, titoloSessione(b), !!corrente && corrente.sessionId === b.sessionId));
+    }
+    case "posta": {
+      const email = normEmail(settings.email);
+      const v = vistaPosta({
+        settings,
+        rec: email ? state.posta?.get(chiaveLettura(email, modoDi(settings))) : null,
+        haPassword: !!passwordDi(state.globalSettings, email),
+      });
+      return img(postaKey(v.titolo, v.valore, v.sub, v.tono));
+    }
+    case "thecore": {
+      const v = vistaTheCore({ settings, tc: state.thecore, conf: confTheCore(state.globalSettings) });
+      return img(thecoreKey(v.glifo, v.titolo, v.valore, v.sub, v.tono, !!v.pagina));
     }
     case "approve-allow":
     case "approve-always":

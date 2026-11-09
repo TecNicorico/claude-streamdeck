@@ -223,6 +223,91 @@ I tre tasti di approvazione cambiano faccia secondo cosa c'è in attesa.
 - Una pressione troppo vicina a un cambio (richiesta nuova, pagina girata) fa
   lampeggiare il tasto e non conta: premi di nuovo.
 
+## La terza pagina: posta e TheCore
+
+Due tasti nuovi, pensati per una pagina tutta loro accanto ai due di Discord.
+
+- **Posta (Gmail)**: quante mail ci sono da leggere in una casella Gmail o Google
+  Workspace. Premuto apre Gmail su quell'account nel browser (per indirizzo, con
+  `?authuser=`, quindi non importa in che ordine sono collegati gli account).
+- **TheCore**: un numero del gestionale, scelto dal menu del tasto. Premuto apre la
+  pagina di TheCore da cui quel numero viene.
+
+Il colore dice lo stato, come nel resto del plugin: la riga sotto **ambra** vuol dire
+che c'è da fare qualcosa, la cornice **rossa** che qualcosa si è rotto. Un numero
+che non si è potuto aggiornare resta, con scritto «offline · 10:32»: non diventa mai
+uno zero. Si legge solo mentre la pagina è aperta: la posta ogni due minuti (e 45
+secondi dopo che l'hai aperta), TheCore ogni cinque.
+
+### Il tasto Posta
+
+1. Sull'account Google serve la **verifica in due passaggi**. Poi apri
+   <https://myaccount.google.com/apppasswords>, crea una password per le app
+   (chiamala «Stream Deck») e copia le 16 lettere.
+2. Trascina **Posta (Gmail)** sulla pagina e, nelle impostazioni del tasto, scrivi
+   l'indirizzo e incolla la password. Gli spazi non contano.
+3. **Cosa contare**: «Principale, come Gmail» conta le conversazioni non lette della
+   scheda Principale, cioè il numero che Gmail scrive accanto a «Posta in arrivo»;
+   «Tutta la posta in arrivo» conta i messaggi, promozioni e social compresi.
+4. Un tasto per casella. L'etichetta in alto è la parte prima della @, o quella che
+   scrivi.
+
+La password sta nelle impostazioni del plugin su questo PC, non in quelle del
+tasto: un profilo esportato non se la porta dietro. La casella si apre in sola
+lettura (`EXAMINE`): contare non segna niente come letto. Se Google rifiuta la
+password il tasto scrive «password rifiutata» e **non riprova da solo** (troppi
+accessi falliti fanno bloccare l'account): riprova appena ne incolli una nuova. Su
+un account di lavoro l'amministratore può aver spento IMAP o le password per le app:
+il tasto lo dice («IMAP rifiutato»).
+
+### Il tasto TheCore
+
+Serve TheCore con la migration `0156` (branch `claude/wizardly-brown-t2ivdl` del
+repository `thecore-v2`, da portare su staging e poi in produzione).
+
+1. In TheCore: **Impostazioni → Preferenze → Stream Deck → Genera la chiave**. La
+   chiave si vede una volta sola, insieme all'indirizzo della funzione e a quello di
+   TheCore. Possono generarla coordinatore e visualizzatore: i numeri sono di tutta
+   la stagione.
+2. Trascina **TheCore** sulla pagina e, in fondo alle sue impostazioni, nella
+   sezione **TheCore — condivise**, incolla le tre cose. Valgono per tutti i tasti
+   TheCore. Sotto deve comparire «Collegato · stagione …».
+3. Per ogni tasto scegli **Che numero mostra**:
+
+| Gruppo | Metrica | Il tasto dice | Premuto apre |
+|---|---|---|---|
+| Vendite | Fatturato della stagione | lordo dello shop, al netto dei resi, e la variazione contro l'anno scorso alla stessa data | P&L effettivo |
+| Vendite | Ordini di oggi | ordini, incasso di oggi e ordini di ieri | Dashboard ordini |
+| Vendite | Scuole ufficializzate | firmate, su quante raggiunte | Directory |
+| Directory | Scuole raggiunte | in Directory, contro l'anno scorso alla stessa data | Metriche |
+| Directory | Scuole senza sales | da assegnare; ambra se ce n'è una segnalata per competitor | Directory |
+| Directory | Richieste dal form | da assegnare | Contatti senza scuola |
+| Hiring | Candidature da scrutinare | la coda di Lavora, e quante oggi | Lavora |
+| Hiring | Documenti da verificare | candidature con un documento in verifica | Tutte le candidature |
+| Hiring | Eletti senza documento | da contattare | Tutte le candidature |
+| Hiring | RIS eletti | col documento verificato | Metriche RIS |
+| Operativo | Avvisi della Dashboard | rossi e gialli, di tutte le regole | Dashboard |
+| Operativo | Job dell'outbox | falliti nell'ultima settimana e fermi; «ok» se niente | (rilegge) |
+| Operativo | PLAO firmate | da controllare prima dell'ultimo lunedì, e quante da firmare | Paghe |
+| Operativo | Ordini fornitori con un problema | in rosso se ce n'è uno | Ordini fornitori |
+
+Se TheCore rifiuta la chiave (rigenerata, revocata, o il ruolo è cambiato) il tasto
+scrive «chiave rifiutata» e smette di mostrare i numeri.
+
+### Una disposizione per lo Stream Deck MK.2 (15 tasti)
+
+```
+| Posta personale | Posta lavoro   | Fatturato       | Discord        | Discord       |
+| Ordini oggi     | Raggiunte      | Senza sales     | Candidature    | Documenti     |
+| Firmate         | Avvisi         | PLAO firmate    | Outbox         | Fornitori     |
+```
+
+Sposta i due Discord dove stanno nelle altre pagine. **Mentre guardi questa pagina
+Claude può chiedere qualcosa**: dai a tre tasti TheCore della riga in basso la voce
+**Con una richiesta in attesa diventa** (Deny / Info / Allow, nelle stesse posizioni
+della pagina di Claude), e la riga diventa quella delle risposte finché la richiesta
+è aperta, per tornare ai numeri subito dopo.
+
 ## Se qualcosa non va
 
 - **Il pannello dice «chiave deck errata»:** nel campo c'è la chiave CLOUD, o una
@@ -243,4 +328,7 @@ I tre tasti di approvazione cambiano faccia secondo cosa c'è in attesa.
 - Plugin: `src/relay.js` (sessioni e richieste cloud), `src/domande.js` (opzioni sui
   tasti), `src/supabase.js` (lettura o scrittura, PROD o STAGING), la riga in basso
   in `rigaInBasso` di `src/view.js`.
+- Terza pagina: `src/imap.js` (il minimo di IMAP, senza dipendenze), `src/posta.js`
+  e `src/thecore.js` (cosa disegnano i tasti, puri), il disegno in `postaKey` e
+  `thecoreKey` di `src/keyart.js`.
 - `npm test` esegue tutti i test, compresi quelli del relay e dell'hook.

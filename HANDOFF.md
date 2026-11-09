@@ -361,3 +361,35 @@ Guida utente in italiano: `DECK-REMOTO.md`. Per chi tocca il codice:
 - `src/supabase.js` decide lettura/scrittura e PROD/STAGING. Nel dubbio scrittura, e un
   progetto sconosciuto vale produzione. ALLOW con `painted.lungo` approva solo dopo 2 s
   tenuto premuto (`keyUp` prima = avviso).
+
+## La terza pagina: Posta e TheCore (1.10.0)
+
+Guida utente: `DECK-REMOTO.md`, «La terza pagina». Per chi tocca il codice:
+
+- `src/imap.js` è un client IMAP minimo su `tls`, senza dipendenze: saluto, LOGIN,
+  EXAMINE, SEARCH X-GM-RAW / STATUS UNSEEN, FETCH X-GM-THRID, LOGOUT. **EXAMINE, mai
+  SELECT**: SELECT aprirebbe la casella in scrittura, e contare segnerebbe le mail come
+  lette a chi guarda il deck. `test/imap.test.js` lo controlla su un server finto, che
+  ricorda cosa il client manda.
+- **La password per le app sta nelle impostazioni globali, per indirizzo**
+  (`{posta: {"<email>": {password}}}`), mai in quelle del tasto: le impostazioni di un
+  tasto finiscono in un profilo esportato. `caselleDaLeggere` non guarda il tasto
+  nemmeno se ci trova una password (`test/posta.test.js`).
+- **Una password rifiutata non si riprova** (`prossimaLettura` → Infinity) finché la sua
+  impronta non cambia: Google blocca un account dopo troppi accessi falliti, e un tasto
+  che riprova ogni due minuti è il modo più rapido di farselo bloccare.
+- `src/thecore.js` legge `deck-metriche` di TheCore (migration 0156). Il contratto è il
+  riassunto `{versione: 1, stagione, vendite, directory, hiring, operativo}`:
+  `RIASSUNTO` in `test/thecore.test.js` ha le stesse chiavi che il Test 6 di
+  `backend/supabase/tests/deck_metriche.sql` nomina in TheCore. Una metrica nuova è una
+  chiave nuova là (con la sua decisione) e una voce in `METRICHE` qui, più una riga in
+  `METRICHE_PI` del pannello: `test/thecore.test.js` confronta pannello e codice.
+- Una chiave rifiutata (401) **non tiene i numeri di prima**: una chiave revocata deve
+  smettere di mostrare i dati. Un guasto di rete sì, con «offline · hh:mm».
+- Il peso del colore sulla terza pagina è stato deciso guardando l'anteprima: «da
+  fare» colora solo la riga sotto, «guasto» aggiunge una cornice sottile. Con la
+  cornice forte per ogni coda non vuota la pagina era ambra tutti i giorni. La cornice
+  forte resta di «una sessione aspetta te».
+- Solo i tasti TheCore hanno lo slot della riga in basso (`TASTI_CON_SLOT`): la Posta
+  no, perché premuta apre Gmail e un tocco per leggere la posta non deve diventare
+  un'approvazione.
