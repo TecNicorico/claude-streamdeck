@@ -4198,27 +4198,56 @@ function domandaRispondibile(req) {
   if (String(req?.toolName ?? "") !== "AskUserQuestion") return false;
   const qs = req?.toolInput?.questions;
   if (!Array.isArray(qs) || !qs.length || qs.length > MAX_DOMANDE) return false;
-  return qs.every((q) => q && typeof q.question === "string" && q.question && !q.multiSelect && Array.isArray(q.options) && q.options.length >= 2 && q.options.length <= MAX_OPZIONI && q.options.every((o) => o && typeof o.label === "string" && o.label));
+  return qs.every((q) => q && typeof q.question === "string" && q.question && Array.isArray(q.options) && q.options.length >= 2 && q.options.length <= MAX_OPZIONI && q.options.every((o) => o && typeof o.label === "string" && o.label));
 }
-var statoIniziale = () => ({ passo: 0, pagina: 0, risposte: {} });
+var statoIniziale = () => ({ passo: 0, pagina: 0, risposte: {}, scelte: [] });
+var pagina = (verso, testo, sub, avanti = true) => ({ tipo: "pagina", verso, testo, sub, avanti });
+var VUOTO = { tipo: "vuoto" };
 function facce(req, stato = statoIniziale()) {
   const qs = req?.toolInput?.questions ?? [];
   const q = qs[stato.passo];
   if (!q) return [null, null, null];
+  if (q.multiSelect) {
+    const scelte = stato.scelte ?? [];
+    const s = q.options.map((o, indice) => ({ tipo: "scelta", indice, label: o.label, scelta: scelte.includes(indice) }));
+    const conferma = { tipo: "conferma", n: scelte.length };
+    if (s.length === 2) return [s[0], conferma, s[1]];
+    if (stato.pagina === 0) return [s[0], pagina(1, "altre", s.length === 3 ? "opzione 3" : "opzioni 3-4"), s[1]];
+    if (stato.pagina === 1) return [s[2], pagina(2, "avanti", "per confermare"), s[3] ?? VUOTO];
+    return [pagina(0, "indietro", "opzioni 1-2", false), conferma, VUOTO];
+  }
   const opz = q.options.map((o, indice) => ({ tipo: "opzione", indice, label: o.label }));
   if (opz.length === 2) return [opz[0], { tipo: "domanda" }, opz[1]];
   if (opz.length === 3) return [opz[0], opz[1], opz[2]];
-  return stato.pagina === 0 ? [opz[0], { tipo: "pagina", verso: 1, testo: "altre \u25B8" }, opz[1]] : [opz[2], { tipo: "pagina", verso: 0, testo: "\u25C2 altre" }, opz[3]];
+  return stato.pagina === 0 ? [opz[0], pagina(1, "altre 2", "opzioni 3-4"), opz[1]] : [opz[2], pagina(0, "altre 2", "opzioni 1-2", false), opz[3]];
+}
+function chiaveFaccia(stato, f) {
+  if (!f) return null;
+  const extra = f.tipo === "scelta" ? `:${f.scelta ? 1 : 0}` : f.tipo === "conferma" ? `:${f.n}` : "";
+  return `${stato.passo}:${stato.pagina}:${f.tipo}:${f.indice ?? f.verso ?? ""}${extra}`;
 }
 function premi(req, stato, slot) {
   const qs = req?.toolInput?.questions ?? [];
   const faccia = facce(req, stato)[slot];
-  if (!faccia || faccia.tipo === "domanda") return { stato, risposte: null, nulla: true };
+  const nulla = { stato, risposte: null, nulla: true };
+  if (!faccia || faccia.tipo === "domanda" || faccia.tipo === "vuoto") return nulla;
   if (faccia.tipo === "pagina") return { stato: { ...stato, pagina: faccia.verso }, risposte: null };
+  if (faccia.tipo === "scelta") {
+    const scelte = stato.scelte ?? [];
+    const nuove = scelte.includes(faccia.indice) ? scelte.filter((i) => i !== faccia.indice) : [...scelte, faccia.indice];
+    return { stato: { ...stato, scelte: nuove }, risposte: null };
+  }
   const q = qs[stato.passo];
-  const risposte = { ...stato.risposte, [q.question]: faccia.label };
+  let risposta;
+  if (faccia.tipo === "conferma") {
+    if (!faccia.n) return nulla;
+    risposta = [...stato.scelte].sort((a, b) => a - b).map((i) => q.options[i].label);
+  } else {
+    risposta = faccia.label;
+  }
+  const risposte = { ...stato.risposte, [q.question]: risposta };
   if (stato.passo + 1 < qs.length) {
-    return { stato: { passo: stato.passo + 1, pagina: 0, risposte }, risposte: null };
+    return { stato: { passo: stato.passo + 1, pagina: 0, risposte, scelte: [] }, risposte: null };
   }
   return { stato: { ...stato, risposte }, risposte };
 }
@@ -4258,9 +4287,13 @@ function decisionBody(kind, req, opts = {}) {
   if (!entry) return null;
   return wrap({ behavior: "allow", updatedPermissions: [entry] });
 }
+var RISPOSTE_GREZZE = Symbol("risposteGrezze");
 function answerBody(req, answers) {
   const input = req?.toolInput && typeof req.toolInput === "object" ? req.toolInput : {};
-  return wrap({ behavior: "allow", updatedInput: { ...input, answers } });
+  const unite = Object.fromEntries(Object.entries(answers ?? {}).map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : v]));
+  const body = wrap({ behavior: "allow", updatedInput: { ...input, answers: unite } });
+  body[RISPOSTE_GREZZE] = answers;
+  return body;
 }
 var NAME_MAX = 11;
 var TARGET_MAX = 14;
@@ -4597,7 +4630,7 @@ function decisioneDa(body) {
   if (d.behavior === "deny") return { tipo: "rifiuta" };
   if (d.behavior !== "allow") return null;
   if (Array.isArray(d.updatedPermissions) && d.updatedPermissions.length) return null;
-  const answers = d.updatedInput?.answers;
+  const answers = body?.[RISPOSTE_GREZZE] ?? d.updatedInput?.answers;
   if (answers && typeof answers === "object") return { tipo: "rispondi", risposte: answers };
   return { tipo: "approva" };
 }
@@ -4914,7 +4947,7 @@ function aCapo(testo, max, righe) {
 }
 function grandeKey(o = {}) {
   const colIcona = o.colIcona ?? C.text;
-  const icona = o.numero != null ? `<circle cx="72" cy="34" r="21" fill="${colIcona}"/>${txt(72, 43, 26, 800, C.bg, String(o.numero))}` : o.icona ? glyph(o.icona, 50, 12, 44, colIcona, 3.2) : "";
+  const icona = o.casella != null ? o.casella ? `<circle cx="72" cy="34" r="21" fill="${colIcona}"/>${glyph("allow", 58, 20, 28, C.bg, 3.6)}` : `<circle cx="72" cy="34" r="19.5" fill="none" stroke="${colIcona}" stroke-width="3"/>${txt(72, 42.5, 24, 800, colIcona, String(o.numero ?? ""))}` : o.numero != null ? `<circle cx="72" cy="34" r="21" fill="${colIcona}"/>${txt(72, 43, 26, 800, C.bg, String(o.numero))}` : o.icona ? glyph(o.icona, 50, 12, 44, colIcona, 3.2) : "";
   const righe = (o.testo ?? []).filter((t) => t != null && t !== "");
   let corpoSvg = "";
   const LARGO = 120;
@@ -4976,6 +5009,36 @@ function opzioneKey(numero, intestazione, label, sub, phase = null, cloud = fals
     testo: aCapo(label, 12, 3),
     piede: String(intestazione || "domanda").toUpperCase() + (sub ? ` ${sub}` : "")
   });
+}
+function sceltaKey(numero, label, scelta, intestazione, cloud = false, phase = null) {
+  return grandeKey({
+    casella: !!scelta,
+    numero,
+    colIcona: C.ask,
+    tinta: C.ask,
+    forte: !!scelta,
+    phase: scelta ? null : phase,
+    cloud,
+    testo: aCapo(label, 12, 3),
+    piede: scelta ? "scelta" : String(intestazione || "domanda").toUpperCase(),
+    colPiede: scelta ? C.ask : C.dim
+  });
+}
+function confermaKey(n, intestazione, cloud = false) {
+  return grandeKey({
+    icona: "allow",
+    colIcona: n ? C.ask : SPENTO,
+    tinta: n ? C.ask : null,
+    forte: !!n,
+    cloud,
+    testo: ["CONFERMA"],
+    testo2: n ? `${n} ${n === 1 ? "scelta" : "scelte"}` : "nessuna scelta",
+    col2: n ? C.ask : C.dim,
+    piede: String(intestazione || "domanda").toUpperCase()
+  });
+}
+function vuotoKey() {
+  return grandeKey({ tinta: null, piede: "" });
 }
 function paginaKey(testo, sub, avanti = true, cloud = false) {
   return grandeKey({ icona: avanti ? "arrowR" : "arrowL", colIcona: C.ask, tinta: C.ask, cloud, testo: [testo], piede: sub });
@@ -5364,10 +5427,13 @@ function rigaInBasso(kind, env) {
     const qs = req.toolInput?.questions ?? [];
     const passo = qs.length > 1 ? `${st.passo + 1}/${qs.length}` : "";
     const head = String(qs[st.passo]?.header || "domanda");
-    const painted = { reqId: req.id, rule: null, faccia: f ? `${st.passo}:${st.pagina}:${f.tipo}:${f.indice ?? f.verso ?? ""}` : null, lungo: false };
+    const painted = { reqId: req.id, rule: null, faccia: chiaveFaccia(st, f), lungo: false };
     if (!f) return { image: infoKey("question", ["\u2014"], nome, null, { cloud }), painted };
     if (f.tipo === "opzione") return { image: opzioneKey(f.indice + 1, head, f.label, passo, phase, cloud), painted };
-    if (f.tipo === "pagina") return { image: paginaKey("altre 2", f.verso ? "opzioni 3-4" : "opzioni 1-2", !!f.verso, cloud), painted };
+    if (f.tipo === "scelta") return { image: sceltaKey(f.indice + 1, f.label, f.scelta, [head, passo].filter(Boolean).join(" "), cloud, phase), painted };
+    if (f.tipo === "conferma") return { image: confermaKey(f.n, [head, passo].filter(Boolean).join(" "), cloud), painted };
+    if (f.tipo === "pagina") return { image: paginaKey(f.testo, f.sub, f.avanti, cloud), painted };
+    if (f.tipo === "vuoto") return { image: vuotoKey(), painted };
     return { image: domandaKey(head, testoDomanda(req, st), [passo, nome].filter(Boolean).join(" \xB7 "), cloud), painted };
   }
   const c = req ? classifica(req, confDa(state2.globalSettings)) : null;
@@ -6062,6 +6128,8 @@ var modelIdx = /* @__PURE__ */ new Map();
 var shownReq = /* @__PURE__ */ new Map();
 var shownFaccia = /* @__PURE__ */ new Map();
 var shownLungo = /* @__PURE__ */ new Map();
+var shownKind = /* @__PURE__ */ new Map();
+var flipAt = /* @__PURE__ */ new Map();
 var ws = null;
 var animPhase = 0;
 var lastSessionSig = "";
@@ -6076,6 +6144,10 @@ function render(context, kindProprio) {
   const v = views.get(context);
   const cy = cycle.get(context);
   const kind = tipoAdesso(context, kindProprio);
+  if (shownKind.get(context) !== kind) {
+    shownKind.set(context, kind);
+    if (kind !== kindProprio) flipAt.set(context, Date.now());
+  }
   const { image, painted } = viewFor(kind, {
     state,
     // Un tasto di consumi che fa da Allow non ha le impostazioni di un Allow.
@@ -6515,17 +6587,20 @@ function onKeyDown(context, kind) {
     case "approve-always":
     case "approve-deny": {
       try {
+        if (!APPROVE_KINDS.includes(views.get(context)?.kind) && Date.now() - (flipAt.get(context) ?? 0) < 1e3) {
+          return showAlert(context);
+        }
         const d = pressDecision({
           queue: state.approveQueue,
           shownId: shownReq.get(context) ?? null,
           scelta: state.scelta,
           lastHeadChangeAt: state.lastHeadChangeAt,
-          now: Date.now(),
-          // Un tasto di consumi che è appena diventato Allow: un secondo intero prima di
-          // accettare una pressione, perché poteva essere un tocco per aggiornare i consumi.
-          settleMs: APPROVE_KINDS.includes(views.get(context)?.kind) ? void 0 : 1e3
+          now: Date.now()
         });
-        if (d.action === "none") return;
+        if (d.action === "none") {
+          if (d.reason === "settling") showAlert(context);
+          return;
+        }
         if (d.action === "alert") {
           renderApproveAll();
           return showAlert(context);
@@ -6561,16 +6636,17 @@ function rispondi(id, body, perche) {
 function premiDomanda(context, kind, req) {
   const st = state.risposte.get(req.id) ?? statoIniziale();
   const f = facce(req, st)[SLOT[kind]];
-  const atteso = f ? `${st.passo}:${st.pagina}:${f.tipo}:${f.indice ?? f.verso ?? ""}` : null;
-  if (atteso !== (shownFaccia.get(context) ?? null)) {
+  if (chiaveFaccia(st, f) !== (shownFaccia.get(context) ?? null)) {
     renderApproveAll();
     return showAlert(context);
   }
   if (f.tipo === "domanda") return apriRecord(context, sessioneDi(req));
+  if (f.tipo === "vuoto") return;
   const esito = premi(req, st, SLOT[kind]);
+  if (esito.nulla) return showAlert(context);
   if (esito.risposte) return void rispondi(req.id, answerBody(req, esito.risposte), "answer");
   state.risposte.set(req.id, esito.stato);
-  state.lastHeadChangeAt = Date.now();
+  if (esito.stato.passo !== st.passo || esito.stato.pagina !== st.pagina) state.lastHeadChangeAt = Date.now();
   renderApproveAll();
 }
 var LUNGO_MS = 2e3;
@@ -6823,6 +6899,8 @@ if (process.argv.includes("--selftest")) {
     } else if (event === "willDisappear") {
       const wasApproveKey = faDaApprovazione(views.get(context));
       views.delete(context);
+      shownKind.delete(context);
+      flipAt.delete(context);
       cycle.delete(context);
       focusIdx.delete(context);
       usageView.delete(context);

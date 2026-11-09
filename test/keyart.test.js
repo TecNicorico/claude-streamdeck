@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fit, fits, ruleLines, approveKey, usageMeterKey, statusKey, labelKey, actionKey, linesKey, burnKey, bigCountKey, gaugeKey, opzioneKey, paginaKey, domandaKey, infoKey, aCapo, decisioneKey } from "../src/keyart.js";
+import { fit, fits, ruleLines, approveKey, usageMeterKey, statusKey, labelKey, actionKey, linesKey, burnKey, bigCountKey, gaugeKey, opzioneKey, paginaKey, domandaKey, infoKey, aCapo, decisioneKey, sceltaKey, confermaKey } from "../src/keyart.js";
 
 // Every key is 144 units wide. These tests exist because two strings shipped
 // overflowing it silently: the ALWAYS key's rule line measured 199 units (clipped on
@@ -182,6 +182,10 @@ test("i tasti nuovi della riga in basso non escono mai dal loro riquadro", () =>
     assertInsideBox(infoKey("code", aCapo(label, 15, 3), "a-very-long-project-name"), `info ${label}`);
   }
   assertInsideBox(paginaKey("altre 2", "opzioni 3-4", true, true), "pagina");
+  for (const label of ["Sì", "un'opzione lunghissima che va a capo più volte"]) {
+    for (const scelta of [true, false]) assertInsideBox(sceltaKey(4, label, scelta, "INTESTAZIONE 2/3", true), `scelta ${scelta} ${label}`);
+  }
+  for (const n of [0, 1, 4]) assertInsideBox(confermaKey(n, "INTESTAZIONE LUNGA 2/3", true), `conferma ${n}`);
   const comandi = ["npm run db:test:security", "rm -rf /a/very/long/path/that/never/ends/and/goes/on/forever", "x".repeat(80), "ls"];
   for (const command of comandi) {
     const req = { cwd: "/home/user/a-very-long-project-name", toolName: "Bash", toolInput: { command }, cloud: true };

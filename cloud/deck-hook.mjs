@@ -61,7 +61,9 @@ export function titoloDa(payload) {
 
 // La decisione del deck tradotta nella risposta che Claude Code si aspetta. Una
 // risposta a una domanda si riscontra con le domande VERE, quelle dell'input originale
-// che ha solo questo processo: un'etichetta che non è fra le opzioni non passa.
+// che ha solo questo processo: un'etichetta che non è fra le opzioni non passa. Una
+// scelta multipla arriva come elenco e parte come le etichette unite da «, », che è
+// come le scrive il dialogo di Claude Code.
 export function rispostaPerClaude(decisione, toolInput) {
   const wrap = (d) => ({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: d } });
   if (decisione?.tipo === "approva") return wrap({ behavior: "allow" });
@@ -71,10 +73,16 @@ export function rispostaPerClaude(decisione, toolInput) {
     if (!qs.length) return null;
     const answers = {};
     for (const q of qs) {
-      if (q?.multiSelect) return null;
+      const etichette = (q?.options ?? []).map((o) => o?.label);
       const scelta = decisione.risposte?.[q?.question];
-      if (typeof scelta !== "string" || !(q.options ?? []).some((o) => o?.label === scelta)) return null;
-      answers[q.question] = scelta;
+      if (q?.multiSelect) {
+        if (!Array.isArray(scelta) || !scelta.length || new Set(scelta).size !== scelta.length) return null;
+        if (!scelta.every((x) => typeof x === "string" && etichette.includes(x))) return null;
+        answers[q.question] = scelta.join(", ");
+      } else {
+        if (typeof scelta !== "string" || !etichette.includes(scelta)) return null;
+        answers[q.question] = scelta;
+      }
     }
     return wrap({ behavior: "allow", updatedInput: { ...toolInput, answers } });
   }

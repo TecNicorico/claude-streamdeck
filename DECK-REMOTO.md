@@ -31,10 +31,10 @@ sessione sul PC ──hook──▶ plugin (http://127.0.0.1, come prima)
   claude.ai resta rispondibile per tutto il tempo: vale la prima risposta, e se
   rispondi lì sparisce anche dal deck. Il deck non approva mai niente da solo, e un
   guasto del relay non blocca mai Claude.
-- **Non si fanno dal deck:** le domande a scelta multipla e le risposte scritte a
-  mano (si rispondono su Claude, e il tasto Waiting le segnala), e le domande della
-  chat normale di claude.ai o della app desktop, che non hanno un modo per parlare
-  con altri programmi.
+- **Non si fanno dal deck:** le risposte scritte a mano («altro») e le domande con
+  più di quattro opzioni (si rispondono su Claude, e il tasto Waiting le segnala), e
+  le domande della chat normale di claude.ai o della app desktop, che non hanno un
+  modo per parlare con altri programmi.
 
 ## 1. Installare il plugin aggiornato (Windows)
 
@@ -200,6 +200,8 @@ I tre tasti di approvazione cambiano faccia secondo cosa c'è in attesa.
 | domanda con 2 opzioni | opzione 1 | il testo della domanda | opzione 2 |
 | domanda con 3 opzioni | opzione 1 | opzione 2 | opzione 3 |
 | domanda con 4 opzioni | opzione 1 (poi 3) | altre ▸ / ◂ altre | opzione 2 (poi 4) |
+| scelta multipla, 2 opzioni | casella 1 | CONFERMA | casella 2 |
+| scelta multipla, 3-4 opzioni | caselle 1, poi 3 | altre ▸, avanti ▸, poi CONFERMA | caselle 2, poi 4 |
 
 - Più richieste insieme si mettono in fila, dalla più vecchia; «+1» in alto a destra
   vuol dire che dopo questa ce n'è un'altra.
@@ -210,6 +212,11 @@ I tre tasti di approvazione cambiano faccia secondo cosa c'è in attesa.
 - Se lasci ALLOW prima dei 2 secondi, non approva e il tasto lampeggia.
 - Una domanda con più quesiti si risponde un quesito alla volta; le risposte partono
   tutte insieme alla fine.
+- A scelta multipla ogni pressione spunta o toglie l'opzione (disco pieno con la spunta
+  = scelta, cerchio col numero = no), e si risponde con CONFERMA, che dice quante ne
+  hai scelte. CONFERMA senza niente spuntato lampeggia e non risponde.
+- Una pressione troppo vicina a un cambio (richiesta nuova, pagina girata) fa
+  lampeggiare il tasto e non conta: premi di nuovo.
 
 ## Se qualcosa non va
 

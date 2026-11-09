@@ -12,6 +12,7 @@ import path from "node:path";
 import {
   C, gaugeKey, linesKey, bigCountKey, burnKey, usageMeterKey, labelKey, actionKey,
   statusKey, fmtNum, aCapo, decisioneKey, opzioneKey, paginaKey, domandaKey, infoKey, iconaStrumento, selettoreKey,
+  sceltaKey, confermaKey, vuotoKey,
 } from "./keyart.js";
 import { budgetPct, gaugeSource, familyOf } from "./usage.js";
 import {
@@ -19,7 +20,7 @@ import {
   blockedSessions, titoloSessione,
 } from "./status.js";
 import { approvable, approvableDepth, isQuestion, describeRequest, richiestaCorrente, sessioniInAttesa } from "./approve.js";
-import { SLOT, facce, testoDomanda, statoIniziale } from "./domande.js";
+import { SLOT, facce, testoDomanda, statoIniziale, chiaveFaccia } from "./domande.js";
 import { classifica, etichetta, bersaglio, confDa } from "./supabase.js";
 
 // The state a request still held in the approver queue implies for one session, or null.
@@ -377,10 +378,13 @@ export function rigaInBasso(kind, env) {
     const qs = req.toolInput?.questions ?? [];
     const passo = qs.length > 1 ? `${st.passo + 1}/${qs.length}` : "";
     const head = String(qs[st.passo]?.header || "domanda");
-    const painted = { reqId: req.id, rule: null, faccia: f ? `${st.passo}:${st.pagina}:${f.tipo}:${f.indice ?? f.verso ?? ""}` : null, lungo: false };
+    const painted = { reqId: req.id, rule: null, faccia: chiaveFaccia(st, f), lungo: false };
     if (!f) return { image: infoKey("question", ["—"], nome, null, { cloud }), painted };
     if (f.tipo === "opzione") return { image: opzioneKey(f.indice + 1, head, f.label, passo, phase, cloud), painted };
-    if (f.tipo === "pagina") return { image: paginaKey("altre 2", f.verso ? "opzioni 3-4" : "opzioni 1-2", !!f.verso, cloud), painted };
+    if (f.tipo === "scelta") return { image: sceltaKey(f.indice + 1, f.label, f.scelta, [head, passo].filter(Boolean).join(" "), cloud, phase), painted };
+    if (f.tipo === "conferma") return { image: confermaKey(f.n, [head, passo].filter(Boolean).join(" "), cloud), painted };
+    if (f.tipo === "pagina") return { image: paginaKey(f.testo, f.sub, f.avanti, cloud), painted };
+    if (f.tipo === "vuoto") return { image: vuotoKey(), painted };
     return { image: domandaKey(head, testoDomanda(req, st), [passo, nome].filter(Boolean).join(" · "), cloud), painted };
   }
 

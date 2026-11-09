@@ -550,7 +550,13 @@ function aCapo(testo, max, righe) {
 //   angolo    in alto a destra: { badge: n } oppure { testo: "2 s" }
 function grandeKey(o = {}) {
   const colIcona = o.colIcona ?? C.text;
-  const icona = o.numero != null
+  // Il disco: pieno col numero (opzione a scelta singola), oppure una casella (scelta
+  // multipla): vuota col numero, piena con la spunta quando è scelta.
+  const icona = o.casella != null
+    ? (o.casella
+      ? `<circle cx="72" cy="34" r="21" fill="${colIcona}"/>${glyph("allow", 58, 20, 28, C.bg, 3.6)}`
+      : `<circle cx="72" cy="34" r="19.5" fill="none" stroke="${colIcona}" stroke-width="3"/>${txt(72, 42.5, 24, 800, colIcona, String(o.numero ?? ""))}`)
+    : o.numero != null
     ? `<circle cx="72" cy="34" r="21" fill="${colIcona}"/>${txt(72, 43, 26, 800, C.bg, String(o.numero))}`
     : o.icona ? glyph(o.icona, 50, 12, 44, colIcona, 3.2) : "";
   const righe = (o.testo ?? []).filter((t) => t != null && t !== "");
@@ -623,6 +629,29 @@ function opzioneKey(numero, intestazione, label, sub, phase = null, cloud = fals
   });
 }
 
+// Un'opzione di una domanda a scelta multipla: la pressione la spunta o la toglie.
+function sceltaKey(numero, label, scelta, intestazione, cloud = false, phase = null) {
+  return grandeKey({
+    casella: !!scelta, numero, colIcona: C.ask, tinta: C.ask, forte: !!scelta, phase: scelta ? null : phase, cloud,
+    testo: aCapo(label, 12, 3), piede: scelta ? "scelta" : String(intestazione || "domanda").toUpperCase(),
+    colPiede: scelta ? C.ask : C.dim,
+  });
+}
+
+// CONFERMA di una scelta multipla: risponde con le opzioni spuntate.
+function confermaKey(n, intestazione, cloud = false) {
+  return grandeKey({
+    icona: "allow", colIcona: n ? C.ask : SPENTO, tinta: n ? C.ask : null, forte: !!n, cloud,
+    testo: ["CONFERMA"], testo2: n ? `${n} ${n === 1 ? "scelta" : "scelte"}` : "nessuna scelta", col2: n ? C.ask : C.dim,
+    piede: String(intestazione || "domanda").toUpperCase(),
+  });
+}
+
+// Un tasto della riga senza niente da fare, dentro una domanda.
+function vuotoKey() {
+  return grandeKey({ tinta: null, piede: "" });
+}
+
 // Il tasto centrale con 4 opzioni: fa vedere le altre due.
 function paginaKey(testo, sub, avanti = true, cloud = false) {
   return grandeKey({ icona: avanti ? "arrowR" : "arrowL", colIcona: C.ask, tinta: C.ask, cloud, testo: [testo], piede: sub });
@@ -665,4 +694,5 @@ export {
   gaugeKey, linesKey, bigCountKey, burnKey, usageMeterKey, labelKey, actionKey,
   STATUS_LOOK, statusKey, APPROVE_LOOK, approveKey, fmtNum,
   aCapo, grandeKey, decisioneKey, opzioneKey, paginaKey, domandaKey, infoKey, iconaStrumento, SPENTO, selettoreKey,
+  sceltaKey, confermaKey, vuotoKey,
 };

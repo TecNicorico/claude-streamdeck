@@ -11,6 +11,8 @@
 // non risponde a un socket: traduce la risposta che il plugin darebbe a Claude Code
 // in una decisione per il relay (approva / rifiuta / rispondi).
 
+import { RISPOSTE_GREZZE } from "./approve.js";
+
 export const PREFISSO = "cloud:";
 
 // Gli orari del relay sono quelli di Cloudflare: si spostano sull'orologio di questo
@@ -86,7 +88,8 @@ export function decisioneDa(body) {
   if (d.behavior !== "allow") return null;
   // Mai regole permanenti dal deck verso il cloud.
   if (Array.isArray(d.updatedPermissions) && d.updatedPermissions.length) return null;
-  const answers = d.updatedInput?.answers;
+  // Le risposte com'erano, con gli elenchi della scelta multipla (vedi answerBody).
+  const answers = body?.[RISPOSTE_GREZZE] ?? d.updatedInput?.answers;
   if (answers && typeof answers === "object") return { tipo: "rispondi", risposte: answers };
   return { tipo: "approva" };
 }

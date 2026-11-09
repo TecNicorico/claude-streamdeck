@@ -76,17 +76,24 @@ export function riduciInput(tool, input) {
 }
 
 // Una risposta valida per QUESTE domande, o null. Ogni domanda deve avere una
-// risposta, e la risposta deve essere una delle sue etichette.
+// risposta: a scelta singola una delle sue etichette, a scelta multipla un elenco non
+// vuoto di sue etichette, senza doppioni.
 export function risposteValide(questions, risposte) {
   if (!Array.isArray(questions) || !questions.length) return null;
   if (!risposte || typeof risposte !== "object") return null;
   const out = {};
   for (const q of questions) {
-    if (q.multiSelect) return null;
+    const etichette = (q.options ?? []).map((o) => o.label);
     const scelta = risposte[q.question];
-    if (typeof scelta !== "string") return null;
-    if (!(q.options ?? []).some((o) => o.label === scelta)) return null;
-    out[q.question] = scelta;
+    if (q.multiSelect) {
+      if (!Array.isArray(scelta) || !scelta.length) return null;
+      if (new Set(scelta).size !== scelta.length) return null;
+      if (!scelta.every((x) => typeof x === "string" && etichette.includes(x))) return null;
+      out[q.question] = [...scelta];
+    } else {
+      if (typeof scelta !== "string" || !etichette.includes(scelta)) return null;
+      out[q.question] = scelta;
+    }
   }
   return out;
 }

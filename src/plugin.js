@@ -19,7 +19,7 @@ import {
   PORT_DEFAULT, HOLD_S_DEFAULT, QUEUE_MAX,
 } from "./approve.js";
 import { startHookServer, BADPATH_WINDOW_MS, BADPATH_MIN_HITS } from "./hookserver.js";
-import { statoIniziale, premi, facce, SLOT } from "./domande.js";
+import { statoIniziale, premi, facce, SLOT, chiaveFaccia } from "./domande.js";
 import { sessioniCloud, richiesteNuove, richiesteSparite, voceDa, decisioneDa, intervallo, urlValido } from "./relay.js";
 import {
   viewFor, gaugeMode, GAUGE_WINDOW, modelList, modelListIndex, sessionEta, PULSE_MS, slotDi, tipoDaMostrare,
@@ -819,6 +819,8 @@ const modelIdx = new Map(); // context -> index into the model list (Model key: 
 const shownReq = new Map();  // context -> the approve request id this key last PAINTED
 const shownFaccia = new Map(); // context -> la faccia di domanda che questo tasto ha DISEGNATO
 const shownLungo = new Map();  // context -> se questo ALLOW chiedeva la pressione lunga
+const shownKind = new Map();   // context -> il tipo che questo tasto ha disegnato l'ultima volta
+const flipAt = new Map();      // context -> quando un tasto di consumi è diventato un tasto della riga
 let ws = null;
 let animPhase = 0;
 let lastSessionSig = ""; // previous tick's session signature (see pollSessions)
@@ -839,6 +841,12 @@ function render(context, kindProprio) {
   const v = views.get(context);
   const cy = cycle.get(context);
   const kind = tipoAdesso(context, kindProprio);
+  // Il momento in cui un tasto di consumi cambia faccia e diventa Deny/Allow: per un
+  // secondo da lì una pressione non vale (poteva essere un tocco per i consumi).
+  if (shownKind.get(context) !== kind) {
+    shownKind.set(context, kind);
+    if (kind !== kindProprio) flipAt.set(context, Date.now());
+  }
   const { image, painted } = viewFor(kind, {
     state,
     // Un tasto di consumi che fa da Allow non ha le impostazioni di un Allow.
@@ -1311,17 +1319,22 @@ function onKeyDown(context, kind) {
       // Wrapped: a double-resolve throws ERR_HTTP_HEADERS_SENT synchronously, and
       // onKeyDown runs bare off the websocket handler - an escape kills every key.
       try {
+        // Un tasto di consumi appena diventato Deny/Allow: un secondo intero prima di
+        // accettare una pressione, perché poteva essere un tocco per aggiornare i consumi.
+        // Solo dal momento in cui ha cambiato faccia, non a ogni pagina di una domanda.
+        if (!APPROVE_KINDS.includes(views.get(context)?.kind) && Date.now() - (flipAt.get(context) ?? 0) < 1_000) {
+          return showAlert(context);
+        }
         const d = pressDecision({
           queue: state.approveQueue,
           shownId: shownReq.get(context) ?? null,
           scelta: state.scelta,
           lastHeadChangeAt: state.lastHeadChangeAt,
           now: Date.now(),
-          // Un tasto di consumi che è appena diventato Allow: un secondo intero prima di
-          // accettare una pressione, perché poteva essere un tocco per aggiornare i consumi.
-          settleMs: APPROVE_KINDS.includes(views.get(context)?.kind) ? undefined : 1_000,
         });
-        if (d.action === "none") return;
+        // Troppo presto dopo un cambio (richiesta nuova, pagina girata): il tasto lo dice,
+        // invece di ignorare la pressione in silenzio.
+        if (d.action === "none") { if (d.reason === "settling") showAlert(context); return; }
         if (d.action === "alert") { renderApproveAll(); return showAlert(context); }
         const target = corrente();
         // Il server dell'hook locale non c'è: le richieste locali non possono arrivare,
@@ -1366,14 +1379,19 @@ function rispondi(id, body, perche) {
 function premiDomanda(context, kind, req) {
   const st = state.risposte.get(req.id) ?? statoIniziale();
   const f = facce(req, st)[SLOT[kind]];
-  const atteso = f ? `${st.passo}:${st.pagina}:${f.tipo}:${f.indice ?? f.verso ?? ""}` : null;
-  if (atteso !== (shownFaccia.get(context) ?? null)) { renderApproveAll(); return showAlert(context); }
+  if (chiaveFaccia(st, f) !== (shownFaccia.get(context) ?? null)) { renderApproveAll(); return showAlert(context); }
   if (f.tipo === "domanda") return apriRecord(context, sessioneDi(req));
+  if (f.tipo === "vuoto") return;
   const esito = premi(req, st, SLOT[kind]);
+  // CONFERMA senza niente spuntato: il tasto lo dice e non risponde.
+  if (esito.nulla) return showAlert(context);
   if (esito.risposte) return void rispondi(req.id, answerBody(req, esito.risposte), "answer");
   state.risposte.set(req.id, esito.stato);
-  // Come un cambio di richiesta: un doppio tocco non risponde alla domanda dopo.
-  state.lastHeadChangeAt = Date.now();
+  // Una domanda nuova o una pagina girata cambiano tutte le facce: come un cambio di
+  // richiesta, un doppio tocco non deve rispondere alla faccia dopo. Una spunta cambia
+  // solo il suo tasto (e il conteggio di CONFERMA): lì l'impronta basta, e due spunte
+  // svelte di seguito non si perdono.
+  if (esito.stato.passo !== st.passo || esito.stato.pagina !== st.pagina) state.lastHeadChangeAt = Date.now();
   renderApproveAll();
 }
 
@@ -1628,6 +1646,8 @@ if (process.argv.includes("--selftest")) {
     } else if (event === "willDisappear") {
       const wasApproveKey = faDaApprovazione(views.get(context));
       views.delete(context);
+      shownKind.delete(context);
+      flipAt.delete(context);
       cycle.delete(context);
       focusIdx.delete(context);
       usageView.delete(context);

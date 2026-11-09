@@ -625,9 +625,9 @@ test("senza scelta si risponde alla più vecchia; con una scelta, a quella sessi
 });
 
 test("le sessioni in attesa, e il giro del selettore", () => {
-  const multipla = { toolName: "AskUserQuestion", toolInput: { questions: [{ question: "Q", multiSelect: true, options: [{ label: "x" }, { label: "y" }] }] } };
-  const q = [rq(1, "a"), rq(2, "b"), rq(3, "a"), rq(4, "c", multipla)];
-  assert.deepEqual(sessioniInAttesa(q), ["a", "b"], "una domanda a scelta multipla non si risponde dal deck");
+  const cinque = { toolName: "AskUserQuestion", toolInput: { questions: [{ question: "Q", multiSelect: false, options: ["a", "b", "c", "d", "e"].map((label) => ({ label })) }] } };
+  const q = [rq(1, "a"), rq(2, "b"), rq(3, "a"), rq(4, "c", cinque)];
+  assert.deepEqual(sessioniInAttesa(q), ["a", "b"], "una domanda con cinque opzioni non si risponde dal deck");
   assert.equal(prossimaScelta(q, null), "b");
   assert.equal(prossimaScelta(q, "b"), "a");
   assert.equal(prossimaScelta([], "a"), null);

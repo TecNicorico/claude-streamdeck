@@ -70,9 +70,13 @@ test("una domanda si risponde solo con un'etichetta offerta, per ogni domanda", 
   assert.deepEqual(risposteValide(due, { "Quale ramo?": "main", "Sicuro?": "sì" }), { "Quale ramo?": "main", "Sicuro?": "sì" });
 });
 
-test("una domanda a scelta multipla non si risponde dal deck", () => {
+test("una domanda a scelta multipla si risponde con un elenco di sue etichette", () => {
   const q = [{ question: "Quali?", header: "", multiSelect: true, options: [{ label: "a" }, { label: "b" }] }];
-  assert.equal(risposteValide(q, { "Quali?": "a" }), null);
+  assert.deepEqual(risposteValide(q, { "Quali?": ["a", "b"] }), { "Quali?": ["a", "b"] });
+  assert.equal(risposteValide(q, { "Quali?": "a" }), null, "una stringa non è un elenco");
+  assert.equal(risposteValide(q, { "Quali?": [] }), null, "almeno una");
+  assert.equal(risposteValide(q, { "Quali?": ["a", "a"] }), null, "niente doppioni");
+  assert.equal(risposteValide(q, { "Quali?": ["a", "z"] }), null, "solo etichette offerte");
 });
 
 test("una domanda non si «approva», e un permesso non si «risponde»", () => {

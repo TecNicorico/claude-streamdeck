@@ -63,9 +63,17 @@ export function decisionBody(kind, req, opts = {}) {
 // La risposta a una domanda di Claude: l'input originale con le risposte scelte, che è
 // la forma in cui Claude Code le riceve dal suo stesso dialogo (verificato nel cloud
 // l'08/11/2026: la sessione ha ricevuto la risposta, `reason_type: hook`).
+// Una risposta a scelta multipla arriva a Claude come le etichette unite da «, », che è
+// come le scrive il suo dialogo. Le risposte com'erano (elenchi) restano sul corpo sotto
+// un simbolo, che JSON.stringify ignora: le legge solo il ticket del cloud, perché il
+// relay e l'hook le verificano opzione per opzione.
+export const RISPOSTE_GREZZE = Symbol("risposteGrezze");
 export function answerBody(req, answers) {
   const input = req?.toolInput && typeof req.toolInput === "object" ? req.toolInput : {};
-  return wrap({ behavior: "allow", updatedInput: { ...input, answers } });
+  const unite = Object.fromEntries(Object.entries(answers ?? {}).map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : v]));
+  const body = wrap({ behavior: "allow", updatedInput: { ...input, answers: unite } });
+  body[RISPOSTE_GREZZE] = answers;
+  return body;
 }
 
 export const NAME_MAX = 11;    // matches the existing statusKey name limit

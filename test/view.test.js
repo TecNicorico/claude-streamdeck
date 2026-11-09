@@ -521,8 +521,8 @@ test("un tasto di consumi impostato come Allow lo diventa solo con una richiesta
 });
 
 test("una domanda a cui il deck non sa rispondere non fa cambiare faccia ai tasti di consumi", () => {
-  const multipla = req({ toolName: "AskUserQuestion", toolInput: { questions: [{ question: "Q", multiSelect: true, options: [{ label: "a" }, { label: "b" }] }] } });
-  assert.equal(tipoDaMostrare("usage-weekly", { slot: "approve-allow" }, [multipla]), "usage-weekly");
+  const cinque = req({ toolName: "AskUserQuestion", toolInput: { questions: [{ question: "Q", multiSelect: false, options: ["a", "b", "c", "d", "e"].map((label) => ({ label })) }] } });
+  assert.equal(tipoDaMostrare("usage-weekly", { slot: "approve-allow" }, [cinque]), "usage-weekly");
 });
 
 test("solo i tasti che mostrano e basta possono fare da riga in basso", () => {
@@ -581,4 +581,16 @@ test("il tasto Status della sessione a cui si risponde porta «RISPONDI», gli a
 
 test("senza richieste Focus torna a essere Focus", () => {
   assert.doesNotMatch(drawn("focus-session", { state: { ...emptyState(), sessions: [session()] } }), /RISPONDI A/);
+});
+
+// ---------- scelta multipla sui tasti ----------
+test("scelta multipla: caselle ai lati, CONFERMA al centro, e la faccia disegnata ricorda la spunta", () => {
+  const r = req({ id: 41, toolName: "AskUserQuestion", toolInput: { questions: [{ question: "Quali linee?", header: "Linee", multiSelect: true, options: [{ label: "Annuari" }, { label: "Merch" }] }] } });
+  const vuota = { ...emptyState(), approveQueue: [r] };
+  assert.match(drawn("approve-deny", { state: vuota }), /Annuari/);
+  assert.match(drawn("approve-always", { state: vuota }), /nessuna scelta/);
+  const spuntata = { ...vuota, risposte: new Map([[41, { passo: 0, pagina: 0, risposte: {}, scelte: [1] }]]) };
+  assert.match(drawn("approve-allow", { state: spuntata }), /scelta/);
+  assert.match(drawn("approve-always", { state: spuntata }), /1 scelta/);
+  assert.notEqual(viewFor("approve-allow", { state: vuota, now: NOW }).painted.faccia, viewFor("approve-allow", { state: spuntata, now: NOW }).painted.faccia);
 });

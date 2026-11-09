@@ -45,7 +45,10 @@ test("una risposta che non è fra le opzioni non arriva a Claude, anche se il re
   assert.equal(rispostaPerClaude({ tipo: "rispondi", risposte: { "Ramo?": "produzione" } }, DOMANDA), null);
   assert.equal(rispostaPerClaude({ tipo: "rispondi", risposte: {} }, DOMANDA), null);
   assert.equal(rispostaPerClaude({ tipo: "sempre" }, {}), null, "niente always");
-  assert.equal(rispostaPerClaude({ tipo: "rispondi", risposte: { "Q": "a" } }, { questions: [{ question: "Q", multiSelect: true, options: [{ label: "a" }] }] }), null);
+  const multipla = { questions: [{ question: "Q", multiSelect: true, options: [{ label: "a" }, { label: "b" }, { label: "c" }] }] };
+  assert.equal(rispostaPerClaude({ tipo: "rispondi", risposte: { "Q": "a" } }, multipla), null, "a scelta multipla serve un elenco");
+  assert.equal(rispostaPerClaude({ tipo: "rispondi", risposte: { "Q": ["a", "z"] } }, multipla), null);
+  assert.deepEqual(rispostaPerClaude({ tipo: "rispondi", risposte: { "Q": ["a", "c"] } }, multipla).hookSpecificOutput.decision.updatedInput.answers, { "Q": "a, c" });
 });
 
 test("il deck non risponde in tempo: l'hook rinuncia e non scrive niente", async () => {
