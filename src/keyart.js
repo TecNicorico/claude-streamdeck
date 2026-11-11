@@ -51,6 +51,10 @@ const D = {
   rosso: "#ed4245", // badge delle menzioni, «si è rotto»
   giallo: "#f0b232", // «c'è da fare»
   tessera: { Vendite: "#23a55a", Directory: "#5865f2", Hiring: "#eb459e", Operativo: "#6d6f78" },
+  // I gruppi del tasto Nexus (src/nexus.js): l'azzurro e il magenta di Nexus, scuriti
+  // finché l'icona bianca sopra regge (3.2:1 e 4.2:1), l'arancio dei veicoli (3.2:1) e
+  // il grigio di «Operativo» per ciò che c'è da guardare oggi.
+  nexus: { Finanze: "#0b9cc2", Investimenti: "#b44fd6", Veicoli: "#d9772b", Oggi: "#6d6f78" },
 };
 
 // Le pagine di Claude parlano la stessa lingua. Gli stati sono i colori di presenza di
@@ -77,6 +81,8 @@ const C = {
     // (OKLCH L 0.76, C 0.055), nei due buchi più larghi della ruota — 275° fra custom
     // (249°) e chat (302°), 122° fra project (93°) e code (152°). 8.4:1 e 8.6:1 sul fondo.
     posta: "#a6afd5", thecore: "#abb790",
+    // Il tasto Nexus: 225°, a metà fra focus (195°) e custom (249°).
+    nexus: "#8cb9cc",
     // Il tasto Luce: nel buco più largo che restava, 40° fra prompt (16°) e launch (63°).
     luce: "#d1a697",
   },
@@ -184,6 +190,8 @@ const GLYPHS = {
   posta: ["M3.5 6 h17 v12 h-17 z", "M3.5 6.5 L12 13 L20.5 6.5"],
   scuola: ["M3 10 L12 4.5 L21 10", "M5 10 v9", "M19 10 v9", "M3 19.5 h18", "M10 19.5 v-5 h4 v5"],
   lampadina: ["M12 3 a6.5 6.5 0 0 0 -3.8 11.8 c0.6 0.5 0.8 1.1 0.8 1.7 v1 h6 v-1 c0 -0.6 0.2 -1.2 0.8 -1.7 A6.5 6.5 0 0 0 12 3 z", "M9.5 20.5 h5"],
+  // Il tasto Nexus: un portafoglio.
+  portafoglio: ["M5.5 7.5 h13 a2 2 0 0 1 2 2 v8 a2 2 0 0 1 -2 2 h-13 a2 2 0 0 1 -2 -2 v-8 a2 2 0 0 1 2 -2 z", "M6 7.5 L15.5 4.2 v3.3", "M16.2 13.5 h0.6"],
 };
 
 // A standalone 72x72 icon for the Stream Deck action list, drawn from the same glyph
@@ -272,6 +280,26 @@ const ICONE = {
   penna: [["p", "M16.1 3.6 L20.4 7.9 L9.8 18.5 L4.4 19.6 L5.5 14.2 Z"], ["t", "M14.2 5.5 L18.5 9.8"], ["l", "M12.6 21 H21"]],
   camion: [["p", "M3.6 6.2 H14.6 V16.4 H2.4 V7.4 A1.2 1.2 0 0 1 3.6 6.2 Z"], ["p", "M15.6 9.2 H18.7 L21.6 12.6 V16.4 H15.6 Z"],
     ["b", cerchio(7, 17.4, 2.3)], ["b", cerchio(17.6, 17.4, 2.3)]],
+  // ---- il tasto Nexus (src/nexus.js) ----
+  portafoglio: [["l", "M5.4 6.6 L15.2 3.6 A1.2 1.2 0 0 1 16.8 4.8 V7"],
+    ["p", "M4.8 6.4 H19 A2.4 2.4 0 0 1 21.4 8.8 V18 A2.4 2.4 0 0 1 19 20.4 H5 A2.4 2.4 0 0 1 2.6 18 V8.6 A2.2 2.2 0 0 1 4.8 6.4 Z"],
+    ["t", "M15.2 13.4 H17.4"]],
+  goccia: [["p", "M12 2.4 C9.6 6 5.4 10.4 5.4 14.8 A6.6 6.6 0 0 0 18.6 14.8 C18.6 10.4 14.4 6 12 2.4 Z"], ["t", "M8.9 14.9 A3.2 3.2 0 0 0 11.6 18"]],
+  su: [["L", "M12 19.6 V5.4"], ["L", "M5.9 11 L12 4.9 L18.1 11"]],
+  giu: [["L", "M12 4.4 V18.6"], ["L", "M5.9 13 L12 19.1 L18.1 13"]],
+  etichetta: [["p", "M3.2 4.8 A1.6 1.6 0 0 1 4.8 3.2 H11.3 A1.6 1.6 0 0 1 12.4 3.7 L20.9 12.2 A1.6 1.6 0 0 1 20.9 14.5 L14.5 20.9 A1.6 1.6 0 0 1 12.2 20.9 L3.7 12.4 A1.6 1.6 0 0 1 3.2 11.3 Z"],
+    ["t", "M7.7 7.7 V7.8"]],
+  carta: [["p", "M4.6 4.8 H19.4 A2.1 2.1 0 0 1 21.5 6.9 V17.1 A2.1 2.1 0 0 1 19.4 19.2 H4.6 A2.1 2.1 0 0 1 2.5 17.1 V6.9 A2.1 2.1 0 0 1 4.6 4.8 Z"],
+    ["t", "M2.6 9.6 H21.4"], ["t", "M6 15 H10.4"]],
+  grafico: [["L", "M3.4 17.8 L9.2 11.6 L13 15.2 L20.2 7.2"], ["L", "M14.6 6.6 H20.6 V12.6"]],
+  auto: [["p", "M5.6 9.6 L7.1 5.7 A1.9 1.9 0 0 1 8.9 4.5 H15.1 A1.9 1.9 0 0 1 16.9 5.7 L18.4 9.6 A2.6 2.6 0 0 1 21 12.2 V16.6 H3 V12.2 A2.6 2.6 0 0 1 5.6 9.6 Z"],
+    ["p", "M4.2 15.6 H8.2 V18.6 A1.1 1.1 0 0 1 7.1 19.7 H5.3 A1.1 1.1 0 0 1 4.2 18.6 Z"], ["p", "M15.8 15.6 H19.8 V18.6 A1.1 1.1 0 0 1 18.7 19.7 H16.9 A1.1 1.1 0 0 1 15.8 18.6 Z"],
+    ["t", "M7.9 9.3 L8.8 6.8 H15.2 L16.1 9.3"], ["t", "M6 13.1 H7.6"], ["t", "M16.4 13.1 H18"]],
+  pompa: [["p", "M4.8 3.2 H12.6 A1.8 1.8 0 0 1 14.4 5 V19.4 H3 V5 A1.8 1.8 0 0 1 4.8 3.2 Z"], ["t", "M6 7 H11.4 V10.6 H6 Z"],
+    ["l", "M2 20.4 H15.4"], ["l", "M14.6 11.6 H16.2 A1.5 1.5 0 0 1 17.7 13.1 V16.4 A1.6 1.6 0 0 0 20.9 16.4 V9 L18.3 6.2"]],
+  calendario: [["l", "M8 2.6 V6"], ["l", "M16 2.6 V6"],
+    ["p", "M5 4.6 H19 A2.1 2.1 0 0 1 21.1 6.7 V18.9 A2.1 2.1 0 0 1 19 21 H5 A2.1 2.1 0 0 1 2.9 18.9 V6.7 A2.1 2.1 0 0 1 5 4.6 Z"],
+    ["t", "M3 10 H21"], ["t", "M7.6 14.2 H10"], ["t", "M14 14.2 H16.4"], ["t", "M7.6 17.6 H10"]],
 
   // ---- le pagine di Claude ----
   // La riga in basso: i tre segni che separano le decisioni anche senza colore.
@@ -648,8 +676,10 @@ function postaKey(f) {
 
 // Una metrica di TheCore: la tessera del gruppo con l'icona della metrica, il nome,
 // il numero grande e la riga sotto. `v` è vistaTheCore(...) di src/thecore.js.
+// Il tasto Nexus si disegna uguale: `v` è vistaNexus(...) di src/nexus.js, e la
+// tessera prende il colore del suo gruppo (D.nexus).
 function thecoreKey(v) {
-  const tessera = D.tessera[v.gruppo] ?? D.tessera.Operativo;
+  const tessera = D.tessera[v.gruppo] ?? D.nexus[v.gruppo] ?? D.tessera.Operativo;
   const tono = TONO_D[v.tono] ?? null;
   const valore = String(v.valore);
   const numCol = v.attenuato || VUOTI.has(valore) ? D.spento : D.testo;

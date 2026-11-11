@@ -44,6 +44,7 @@ const ICONS = {
   // la terza pagina (fork TecNicorico)
   posta: ["posta", C.ident.posta],
   thecore: ["scuola", C.ident.thecore],
+  nexus: ["portafoglio", C.ident.nexus],
   luce: ["lampadina", C.ident.luce],
   // approver
   status: ["dot", C.text],

@@ -46172,7 +46172,7 @@ async function chiama(base2, token, path4, body, ms) {
     clearTimeout(t);
   }
 }
-async function gestisci(payload, { env = process.env, fetchAttesa = chiama, ora: ora3 = Date.now, quandoAperta = () => {
+async function gestisci(payload, { env = process.env, fetchAttesa = chiama, ora: ora4 = Date.now, quandoAperta = () => {
 }, sorveglia = sorvegliaTranscript } = {}) {
   if (env.CLAUDE_CODE_REMOTE !== "true" && env.DECK_ANCHE_LOCALE !== "1") return null;
   if (payload?.hook_event_name === "PermissionRequest" && env.DECK_LETTURE_SQL !== "0" && letturaAutomatica(payload.tool_name, payload.tool_input)) return LETTURA_APPROVATA;
@@ -46203,8 +46203,8 @@ async function gestisci(payload, { env = process.env, fetchAttesa = chiama, ora:
     }
   });
   try {
-    const fine = ora3() + s * 1e3;
-    while (ora3() < fine && !altrove) {
+    const fine = ora4() + s * 1e3;
+    while (ora4() < fine && !altrove) {
       const r = await fetchAttesa(base2, token, "/v1/cloud/attendi", { id: aperta.id }, 25e3);
       if (r?.stato === "decisa") return altrove ? null : rispostaPerClaude(r.decisione, payload.tool_input ?? {});
       if (r?.stato === "sconosciuta") return null;
@@ -46562,12 +46562,12 @@ function tipoErrore(codice) {
   return "server";
 }
 var TuyaCloud = class {
-  constructor({ clientId, secret, regione = "eu", base: base2 = null, fetch: f = globalThis.fetch, ora: ora3 = Date.now } = {}) {
+  constructor({ clientId, secret, regione = "eu", base: base2 = null, fetch: f = globalThis.fetch, ora: ora4 = Date.now } = {}) {
     this.clientId = clientId;
     this.secret = secret;
     this.base = base2 ?? `https://${HOST[regione] ?? HOST.eu}`;
     this.fetch = f;
-    this.ora = ora3;
+    this.ora = ora4;
     this.token = null;
     this.scade = 0;
     this.scarto = 0;
@@ -47883,6 +47883,344 @@ function statoTheCore({ tc, conf }) {
   return `Collegato \xB7 stagione ${tc.dati.stagione.nome ?? stagioneBreve(tc.dati.stagione.codice)} \xB7 ${ora2(tc.at)}`;
 }
 
+// src/nexus.js
+var INTERVALLO_NEXUS_MS = 3e5;
+var RITARDO_ERRORE_NEXUS_MS = 12e4;
+var VERSIONE_NEXUS = 1;
+var eNumero = (n) => typeof n === "number" && Number.isFinite(n);
+var decimali = (n, cifre) => eNumero(n) ? n.toFixed(cifre).replace(".", ",") : "--";
+function importoBreve(n, valuta) {
+  const e = euroBreve(n);
+  return !valuta || valuta === "EUR" || e === "--" ? e : e.replace("\u20AC", valuta);
+}
+function quoteDette(n) {
+  if (!eNumero(n)) return "--";
+  return n.toFixed(3).replace(/0+$/, "").replace(/\.$/, "").replace(".", ",");
+}
+function resaDetta(resa) {
+  if (!eNumero(resa)) return null;
+  const p = decimali(Math.abs(resa), 1).replace(/,0$/, "");
+  return resa > 0 ? `\u25B2 ${p}%` : resa < 0 ? `\u25BC ${p}%` : "= 0%";
+}
+var due = (n) => String(n).padStart(2, "0");
+var giornoBreve = (iso) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso ?? ""));
+  return m ? `${m[3]}/${m[2]}` : "";
+};
+function quandoBreve(iso, adesso = /* @__PURE__ */ new Date()) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const oggi = d.getFullYear() === adesso.getFullYear() && d.getMonth() === adesso.getMonth() && d.getDate() === adesso.getDate();
+  return oggi ? `${due(d.getHours())}:${due(d.getMinutes())}` : `${due(d.getDate())}/${due(d.getMonth() + 1)}`;
+}
+var conta = (n, uno, molti) => `${numero(n)} ${n === 1 ? uno : molti}`;
+function scelto(elenco, nome) {
+  if (!Array.isArray(elenco) || elenco.length === 0) return null;
+  const n = String(nome ?? "").trim().toLowerCase();
+  if (!n) return elenco[0];
+  return elenco.find((x) => String(x?.nome ?? "").trim().toLowerCase() === n) ?? null;
+}
+var senzaVeicolo = (d, s) => ({ valore: "--", sub: (d.veicoli ?? []).length === 0 ? "nessun veicolo" : `\xAB${String(s?.veicolo ?? "").trim()}\xBB non c'\xE8` });
+var METRICHE_NEXUS = {
+  // --------------------------------------------------------------- finanze
+  patrimonio: {
+    gruppo: "Finanze",
+    nome: "Patrimonio",
+    titolo: "Patrimonio",
+    glifo: "portafoglio",
+    pagina: "/",
+    vista: (d) => ({ valore: euroBreve(d.finanze.patrimonio), sub: `liquidi ${euroBreve(d.finanze.liquidita)}` })
+  },
+  liquidita: {
+    gruppo: "Finanze",
+    nome: "Liquidit\xE0",
+    titolo: "Liquidit\xE0",
+    glifo: "goccia",
+    pagina: "/conti",
+    vista: (d) => ({ valore: euroBreve(d.finanze.liquidita), sub: d.finanze.usciteOggi > 0 ? `oggi -${euroBreve(d.finanze.usciteOggi)}` : "sui conti" })
+  },
+  uscite_mese: {
+    gruppo: "Finanze",
+    nome: "Uscite del mese",
+    titolo: "Uscite",
+    glifo: "giu",
+    pagina: "/finanze?scheda=flussi",
+    vista: (d) => ({
+      valore: euroBreve(d.finanze.usciteMese),
+      sub: d.finanze.usciteOggi > 0 ? `oggi ${euroBreve(d.finanze.usciteOggi)}` : `scorso ${euroBreve(d.finanze.usciteMeseScorso)}`
+    })
+  },
+  entrate_mese: {
+    gruppo: "Finanze",
+    nome: "Entrate del mese",
+    titolo: "Entrate",
+    glifo: "su",
+    pagina: "/finanze?scheda=flussi",
+    vista: (d) => ({ valore: euroBreve(d.finanze.entrateMese), sub: `scorso ${euroBreve(d.finanze.entrateMeseScorso)}` })
+  },
+  netto_mese: {
+    gruppo: "Finanze",
+    nome: "Risparmio del mese (entrate \u2212 uscite)",
+    titolo: "Risparmio",
+    glifo: "euro",
+    pagina: "/finanze?scheda=flussi",
+    vista: (d) => ({
+      valore: euroBreve(d.finanze.nettoMese),
+      sub: d.finanze.investitoMese > 0 ? `investiti ${euroBreve(d.finanze.investitoMese)}` : "entrate \u2212 uscite"
+    })
+  },
+  uscite_oggi: {
+    gruppo: "Finanze",
+    nome: "Uscite di oggi",
+    titolo: "Spesi oggi",
+    glifo: "carrello",
+    pagina: "/finanze",
+    vista: (d) => ({ valore: euroBreve(d.finanze.usciteOggi), sub: `nel mese ${euroBreve(d.finanze.usciteMese)}` })
+  },
+  da_classificare: {
+    gruppo: "Finanze",
+    nome: "Movimenti da classificare",
+    titolo: "Da classif.",
+    glifo: "etichetta",
+    pagina: "/finanze?filtro=senza",
+    vista: (d) => ({ valore: numero(d.finanze.daClassificare), sub: "da classificare", tono: d.finanze.daClassificare > 0 ? "attenzione" : null })
+  },
+  saldo_conto: {
+    gruppo: "Finanze",
+    nome: "Saldo di un conto",
+    titolo: "Conto",
+    glifo: "carta",
+    pagina: "/conti",
+    vista: (d, s) => {
+      const c = scelto(d.conti, s?.conto);
+      if (!c) return { valore: "--", sub: (d.conti ?? []).length === 0 ? "nessun conto" : `\xAB${String(s?.conto ?? "").trim()}\xBB non c'\xE8` };
+      return { titolo: c.nome, valore: importoBreve(c.saldo, c.valuta), sub: c.tipo === "investimento" ? "versato" : c.tipo };
+    }
+  },
+  // ---------------------------------------------------------- investimenti
+  investimenti: {
+    gruppo: "Investimenti",
+    nome: "Controvalore degli investimenti",
+    titolo: "Investiti",
+    glifo: "grafico",
+    pagina: "/finanze?scheda=investimenti",
+    vista: (d) => {
+      const i = d.investimenti, resa = resaDetta(i.resa);
+      return { valore: euroBreve(i.valore), sub: i.guadagno === null || !resa ? "al versato" : `${resa} \xB7 ${euroBreve(i.guadagno)}` };
+    }
+  },
+  guadagno: {
+    gruppo: "Investimenti",
+    nome: "Guadagno degli investimenti",
+    titolo: "Guadagno",
+    glifo: "moneta",
+    pagina: "/finanze?scheda=investimenti",
+    vista: (d) => {
+      const i = d.investimenti, resa = resaDetta(i.resa);
+      if (i.guadagno === null) return { valore: "--", sub: "manca il prezzo" };
+      return { valore: euroBreve(i.guadagno), sub: resa ? `${resa} sul versato` : "sul versato" };
+    }
+  },
+  versato: {
+    gruppo: "Investimenti",
+    nome: "Versato negli investimenti",
+    titolo: "Versato",
+    glifo: "vassoio",
+    pagina: "/finanze?scheda=investimenti",
+    vista: (d) => ({ valore: euroBreve(d.investimenti.versato), sub: d.finanze.investitoMese > 0 ? `${euroBreve(d.finanze.investitoMese)} nel mese` : "in tutto" })
+  },
+  quote: {
+    gruppo: "Investimenti",
+    nome: "Quote possedute",
+    titolo: "Quote",
+    glifo: "layers",
+    pagina: "/finanze?scheda=investimenti",
+    vista: (d) => {
+      const i = d.investimenti;
+      if (i.stimate > 0) return { valore: quoteDette(i.quote), sub: conta(i.stimate, "stimata", "stimate"), tono: "attenzione" };
+      return { valore: quoteDette(i.quote), sub: eNumero(i.prezzo) ? `a \u20AC ${decimali(i.prezzo, 2)}` : "possedute" };
+    }
+  },
+  prezzo: {
+    gruppo: "Investimenti",
+    nome: "Prezzo del titolo (ultima chiusura)",
+    titolo: "Prezzo",
+    glifo: "battito",
+    pagina: "/finanze?scheda=investimenti",
+    vista: (d) => {
+      const i = d.investimenti;
+      if (!eNumero(i.prezzo)) return { valore: "--", sub: "non c'\xE8 un prezzo solo" };
+      return { valore: `\u20AC ${decimali(i.prezzo, 2)}`, sub: i.prezzoDel ? `chiusura ${giornoBreve(i.prezzoDel)}` : "ultima chiusura" };
+    }
+  },
+  // --------------------------------------------------------------- veicoli
+  km: {
+    gruppo: "Veicoli",
+    nome: "Chilometri del veicolo",
+    titolo: "Chilometri",
+    glifo: "auto",
+    pagina: "/veicoli",
+    vista: (d, s) => {
+      const v = scelto(d.veicoli, s?.veicolo);
+      if (!v) return senzaVeicolo(d, s);
+      return { titolo: v.nome, valore: numero(v.km), sub: v.kmMese > 0 ? `+${numero(v.kmMese)} km nel mese` : "km" };
+    }
+  },
+  consumo: {
+    gruppo: "Veicoli",
+    nome: "Consumo medio del veicolo",
+    titolo: "Consumo",
+    glifo: "pompa",
+    pagina: "/veicoli",
+    vista: (d, s) => {
+      const v = scelto(d.veicoli, s?.veicolo);
+      if (!v) return senzaVeicolo(d, s);
+      return v.consumo === null ? { valore: "--", sub: "servono due pieni" } : { valore: decimali(v.consumo, 1), sub: "l/100 km" };
+    }
+  },
+  spesa_veicolo: {
+    gruppo: "Veicoli",
+    nome: "Spesa del mese per il veicolo",
+    titolo: "Spesa auto",
+    glifo: "euro",
+    pagina: "/veicoli",
+    vista: (d, s) => {
+      const v = scelto(d.veicoli, s?.veicolo);
+      if (!v) return senzaVeicolo(d, s);
+      return { valore: euroBreve(v.spesaMese), sub: `${v.nome} \xB7 nel mese` };
+    }
+  },
+  scadenza: {
+    gruppo: "Veicoli",
+    nome: "Prossima scadenza del veicolo",
+    titolo: "Scadenza",
+    glifo: "calendario",
+    pagina: "/veicoli",
+    vista: (d, s) => {
+      const v = scelto(d.veicoli, s?.veicolo);
+      if (!v) return senzaVeicolo(d, s);
+      const x = v.scadenza;
+      if (!x) return { valore: "ok", sub: "nessuna scadenza" };
+      const tono = x.stato === "scaduta" ? "guasto" : x.stato === "vicina" ? "attenzione" : null;
+      const valore = eNumero(x.giorni) ? x.giorni < 0 ? "scaduta" : x.giorni === 0 ? "oggi" : `${numero(x.giorni)} g` : eNumero(x.km) ? x.km < 0 ? "superata" : `${numero(x.km)} km` : "--";
+      return { valore, sub: String(x.titolo ?? "scadenza"), tono };
+    }
+  },
+  // ------------------------------------------------------------------ oggi
+  oggi: {
+    gruppo: "Oggi",
+    nome: "Cose da guardare oggi",
+    titolo: "Oggi",
+    glifo: "campana",
+    pagina: "/",
+    vista: (d) => {
+      const o = d.oggi;
+      if (o.cose === 0) return { valore: "ok", sub: "niente da guardare" };
+      return { valore: numero(o.cose), sub: o.errori > 0 ? conta(o.errori, "errore", "errori") : "da guardare", tono: o.errori > 0 ? "guasto" : "attenzione" };
+    }
+  },
+  banche: {
+    gruppo: "Oggi",
+    nome: "Banche: la lettura e ci\xF2 che chiede attenzione",
+    titolo: "Banche",
+    glifo: "scuola",
+    pagina: "/banche",
+    vista: (d) => {
+      const b = d.banche;
+      if (b.collegate === 0) return { valore: "--", sub: "nessuna collegata" };
+      if (b.daGuardare > 0) return { valore: numero(b.daGuardare), sub: "da guardare", tono: "attenzione" };
+      const quando = b.ultimaLettura ? quandoBreve(b.ultimaLettura) : "";
+      return { valore: "ok", sub: quando ? `lette ${quando}` : conta(b.collegate, "collegata", "collegate") };
+    }
+  },
+  senza_descrizione: {
+    gruppo: "Oggi",
+    nome: "Movimenti senza descrizione (serve l'estratto conto)",
+    titolo: "Estratto",
+    glifo: "documentoManca",
+    pagina: "/banche",
+    vista: (d) => ({ valore: numero(d.banche.senzaDescrizione), sub: "senza descrizione", tono: d.banche.senzaDescrizione > 0 ? "attenzione" : null })
+  }
+};
+var METRICA_NEXUS_DEFAULT = "patrimonio";
+function metricaNexusDi(settings) {
+  const m = settings?.metrica;
+  return typeof m === "string" && Object.hasOwn(METRICHE_NEXUS, m) ? m : METRICA_NEXUS_DEFAULT;
+}
+function confNexus(globalSettings) {
+  const url = String(globalSettings?.nexusUrl ?? "").trim().replace(/\/+$/, "");
+  const chiave = String(globalSettings?.nexusKey ?? "").trim();
+  const app = String(globalSettings?.nexusApp ?? "").trim();
+  return { url, chiave, app, completa: /^https:\/\//.test(url) && chiave !== "" };
+}
+var paginaNexus = (app, pagina2) => urlPagina(app, pagina2);
+var oggetto = (x) => !!x && typeof x === "object" && !Array.isArray(x);
+function riassuntoNexusValido(d) {
+  return oggetto(d) && d.versione === VERSIONE_NEXUS && ["finanze", "investimenti", "banche", "oggi"].every((g) => oggetto(d[g])) && Array.isArray(d.conti) && Array.isArray(d.veicoli);
+}
+var NexusErrore = class extends Error {
+  // tipo: "chiave" | "server" | "rete" | "formato"
+  constructor(tipo, messaggio) {
+    super(messaggio);
+    this.name = "NexusErrore";
+    this.tipo = tipo;
+  }
+};
+async function leggiNexus({ url, chiave }, { fetchFn = fetch, timeoutMs = 2e4 } = {}) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), timeoutMs);
+  let r;
+  try {
+    r = await fetchFn(url, { headers: { "x-api-key": chiave, accept: "application/json" }, signal: ac.signal });
+  } catch (e) {
+    throw new NexusErrore("rete", String(e?.cause?.code ?? e?.message ?? e));
+  } finally {
+    clearTimeout(t);
+  }
+  if (r.status === 401) throw new NexusErrore("chiave", "chiave non valida o revocata");
+  if (!r.ok) throw new NexusErrore("server", `HTTP ${r.status}`);
+  let d;
+  try {
+    d = await r.json();
+  } catch {
+    throw new NexusErrore("formato", "risposta non JSON");
+  }
+  if (!riassuntoNexusValido(d)) throw new NexusErrore("formato", `risposta inattesa (versione ${d?.versione ?? "?"})`);
+  return d;
+}
+var ora3 = (t) => {
+  const d = new Date(t);
+  return `${due(d.getHours())}:${due(d.getMinutes())}`;
+};
+var MESSAGGIO_ERRORE2 = { chiave: "chiave?", server: "Nexus in errore", rete: "non raggiungibile", formato: "risposta strana" };
+function vistaNexus({ settings, nx, conf }) {
+  const id = metricaNexusDi(settings);
+  const m = METRICHE_NEXUS[id];
+  const base2 = { titolo: m.titolo, glifo: m.glifo, gruppo: m.gruppo, pagina: m.pagina, metrica: id, attenuato: false };
+  if (!conf?.completa) return { ...base2, valore: "\u2014", sub: "imposta Nexus", tono: null, attenuato: true };
+  if (nx?.err === "chiave") return { ...base2, valore: "!", sub: "chiave rifiutata", tono: "attenzione" };
+  if (!nx?.dati) {
+    if (nx?.err) return { ...base2, valore: "--", sub: MESSAGGIO_ERRORE2[nx.err] ?? nx.err, tono: "attenzione" };
+    return { ...base2, valore: "\u2026", sub: "lettura\u2026", tono: null, attenuato: true };
+  }
+  const v = m.vista(nx.dati, settings ?? {});
+  const titolo = v.titolo ?? base2.titolo;
+  if (nx.err) return { ...base2, titolo, valore: v.valore, sub: `offline \xB7 ${ora3(nx.okAt ?? nx.at)}`, tono: null, attenuato: true };
+  return { ...base2, titolo, valore: v.valore, sub: v.sub, tono: v.tono ?? null };
+}
+function statoNexus({ nx, conf }) {
+  if (!conf?.completa) return "Incolla l'indirizzo della funzione e la chiave generata in Nexus (Altro \u2192 Stream Deck).";
+  if (!nx) return "In lettura\u2026";
+  if (nx.err === "chiave") return "Nexus ha rifiutato la chiave: \xE8 stata rigenerata o revocata.";
+  if (nx.err) return `Non raggiungibile (${MESSAGGIO_ERRORE2[nx.err] ?? nx.err})${nx.dati ? `: i numeri sono delle ${ora3(nx.okAt ?? nx.at)}` : ""}.`;
+  if (!nx.dati) return "In lettura\u2026";
+  return `Collegato \xB7 ${conta(nx.dati.conti.length, "conto", "conti")}, ${conta(nx.dati.veicoli.length, "veicolo", "veicoli")} \xB7 ${ora3(nx.at)}`;
+}
+function nomiNexus(nx) {
+  const nomi = (elenco) => Array.isArray(elenco) ? elenco.map((x) => String(x?.nome ?? "")).filter(Boolean) : [];
+  return { conti: nomi(nx?.dati?.conti), veicoli: nomi(nx?.dati?.veicoli) };
+}
+
 // src/domande.js
 var SLOT = { "approve-deny": 0, "approve-always": 1, "approve-allow": 2 };
 var MAX_OPZIONI = 4;
@@ -48363,7 +48701,11 @@ var D = {
   // badge delle menzioni, «si è rotto»
   giallo: "#f0b232",
   // «c'è da fare»
-  tessera: { Vendite: "#23a55a", Directory: "#5865f2", Hiring: "#eb459e", Operativo: "#6d6f78" }
+  tessera: { Vendite: "#23a55a", Directory: "#5865f2", Hiring: "#eb459e", Operativo: "#6d6f78" },
+  // I gruppi del tasto Nexus (src/nexus.js): l'azzurro e il magenta di Nexus, scuriti
+  // finché l'icona bianca sopra regge (3.2:1 e 4.2:1), l'arancio dei veicoli (3.2:1) e
+  // il grigio di «Operativo» per ciò che c'è da guardare oggi.
+  nexus: { Finanze: "#0b9cc2", Investimenti: "#b44fd6", Veicoli: "#d9772b", Oggi: "#6d6f78" }
 };
 var C = {
   bg: D.bg,
@@ -48391,6 +48733,8 @@ var C = {
     // (249°) e chat (302°), 122° fra project (93°) e code (152°). 8.4:1 e 8.6:1 sul fondo.
     posta: "#a6afd5",
     thecore: "#abb790",
+    // Il tasto Nexus: 225°, a metà fra focus (195°) e custom (249°).
+    nexus: "#8cb9cc",
     // Il tasto Luce: nel buco più largo che restava, 40° fra prompt (16°) e launch (63°).
     luce: "#d1a697"
   },
@@ -48518,6 +48862,48 @@ var ICONE = {
     ["b", cerchio(7, 17.4, 2.3)],
     ["b", cerchio(17.6, 17.4, 2.3)]
   ],
+  // ---- il tasto Nexus (src/nexus.js) ----
+  portafoglio: [
+    ["l", "M5.4 6.6 L15.2 3.6 A1.2 1.2 0 0 1 16.8 4.8 V7"],
+    ["p", "M4.8 6.4 H19 A2.4 2.4 0 0 1 21.4 8.8 V18 A2.4 2.4 0 0 1 19 20.4 H5 A2.4 2.4 0 0 1 2.6 18 V8.6 A2.2 2.2 0 0 1 4.8 6.4 Z"],
+    ["t", "M15.2 13.4 H17.4"]
+  ],
+  goccia: [["p", "M12 2.4 C9.6 6 5.4 10.4 5.4 14.8 A6.6 6.6 0 0 0 18.6 14.8 C18.6 10.4 14.4 6 12 2.4 Z"], ["t", "M8.9 14.9 A3.2 3.2 0 0 0 11.6 18"]],
+  su: [["L", "M12 19.6 V5.4"], ["L", "M5.9 11 L12 4.9 L18.1 11"]],
+  giu: [["L", "M12 4.4 V18.6"], ["L", "M5.9 13 L12 19.1 L18.1 13"]],
+  etichetta: [
+    ["p", "M3.2 4.8 A1.6 1.6 0 0 1 4.8 3.2 H11.3 A1.6 1.6 0 0 1 12.4 3.7 L20.9 12.2 A1.6 1.6 0 0 1 20.9 14.5 L14.5 20.9 A1.6 1.6 0 0 1 12.2 20.9 L3.7 12.4 A1.6 1.6 0 0 1 3.2 11.3 Z"],
+    ["t", "M7.7 7.7 V7.8"]
+  ],
+  carta: [
+    ["p", "M4.6 4.8 H19.4 A2.1 2.1 0 0 1 21.5 6.9 V17.1 A2.1 2.1 0 0 1 19.4 19.2 H4.6 A2.1 2.1 0 0 1 2.5 17.1 V6.9 A2.1 2.1 0 0 1 4.6 4.8 Z"],
+    ["t", "M2.6 9.6 H21.4"],
+    ["t", "M6 15 H10.4"]
+  ],
+  grafico: [["L", "M3.4 17.8 L9.2 11.6 L13 15.2 L20.2 7.2"], ["L", "M14.6 6.6 H20.6 V12.6"]],
+  auto: [
+    ["p", "M5.6 9.6 L7.1 5.7 A1.9 1.9 0 0 1 8.9 4.5 H15.1 A1.9 1.9 0 0 1 16.9 5.7 L18.4 9.6 A2.6 2.6 0 0 1 21 12.2 V16.6 H3 V12.2 A2.6 2.6 0 0 1 5.6 9.6 Z"],
+    ["p", "M4.2 15.6 H8.2 V18.6 A1.1 1.1 0 0 1 7.1 19.7 H5.3 A1.1 1.1 0 0 1 4.2 18.6 Z"],
+    ["p", "M15.8 15.6 H19.8 V18.6 A1.1 1.1 0 0 1 18.7 19.7 H16.9 A1.1 1.1 0 0 1 15.8 18.6 Z"],
+    ["t", "M7.9 9.3 L8.8 6.8 H15.2 L16.1 9.3"],
+    ["t", "M6 13.1 H7.6"],
+    ["t", "M16.4 13.1 H18"]
+  ],
+  pompa: [
+    ["p", "M4.8 3.2 H12.6 A1.8 1.8 0 0 1 14.4 5 V19.4 H3 V5 A1.8 1.8 0 0 1 4.8 3.2 Z"],
+    ["t", "M6 7 H11.4 V10.6 H6 Z"],
+    ["l", "M2 20.4 H15.4"],
+    ["l", "M14.6 11.6 H16.2 A1.5 1.5 0 0 1 17.7 13.1 V16.4 A1.6 1.6 0 0 0 20.9 16.4 V9 L18.3 6.2"]
+  ],
+  calendario: [
+    ["l", "M8 2.6 V6"],
+    ["l", "M16 2.6 V6"],
+    ["p", "M5 4.6 H19 A2.1 2.1 0 0 1 21.1 6.7 V18.9 A2.1 2.1 0 0 1 19 21 H5 A2.1 2.1 0 0 1 2.9 18.9 V6.7 A2.1 2.1 0 0 1 5 4.6 Z"],
+    ["t", "M3 10 H21"],
+    ["t", "M7.6 14.2 H10"],
+    ["t", "M14 14.2 H16.4"],
+    ["t", "M7.6 17.6 H10"]
+  ],
   // ---- le pagine di Claude ----
   // La riga in basso: i tre segni che separano le decisioni anche senza colore.
   allow: [["L", "M5 12.8 L10 17.6 L19.4 7.2"]],
@@ -48632,10 +49018,10 @@ function sagoma(tipo, cx, cy, r, fill, extra = "") {
 var testata = (nomeIcona, titolo, fondo, o = {}) => sagoma(o.forma ?? "tessera", 28, 27, 16, fondo) + icona(nomeIcona, 16, 15, 24, o.ink ?? inchiostro(fondo), fondo) + line(52, 33, o.largo ?? 86, 16, 700, o.colTitolo ?? C.text, comeTitolo(titolo), "start", "", 13);
 var testataReport = (nomeIcona, titolo) => icona(nomeIcona, 11, 14, 19, C.dim, C.bg) + line(35, 31, 102, 16, 700, C.dim, comeTitolo(titolo), "start", "", 13);
 var SOTTO_W = 134;
-function sotto(s, col = C.dim, due = false) {
+function sotto(s, col = C.dim, due2 = false) {
   if (!s) return "";
   const str = String(s);
-  if (due && !fits(str, SOTTO_W, 13)) {
+  if (due2 && !fits(str, SOTTO_W, 13)) {
     const i = str.indexOf(" \xB7 ");
     const righe = i > 0 && [str.slice(0, i), str.slice(i + 3)].every((t) => fits(t, SOTTO_W, 13)) ? [str.slice(0, i), str.slice(i + 3)] : aCapo(str, capacity(SOTTO_W, 13), 2);
     return righe.map((t, k) => line(72, 113 + k * 15, SOTTO_W, 13, 500, col, t, "middle", "", 13)).join("");
@@ -48804,7 +49190,7 @@ function postaKey(f) {
     ${line(72, 126, 130, 15, 500, rigaCol, f.riga)}`);
 }
 function thecoreKey(v) {
-  const tessera = D.tessera[v.gruppo] ?? D.tessera.Operativo;
+  const tessera = D.tessera[v.gruppo] ?? D.nexus[v.gruppo] ?? D.tessera.Operativo;
   const tono = TONO_D[v.tono] ?? null;
   const valore = String(v.valore);
   const numCol = v.attenuato || VUOTI.has(valore) ? D.spento : D.testo;
@@ -49201,7 +49587,7 @@ function sessionEta(state2, now) {
   const hh = Math.floor(msLeft / 36e5), mm = Math.round(msLeft % 36e5 / 6e4);
   return hh > 0 ? `cap in ~${hh}h ${mm}m` : `cap in ~${mm}m`;
 }
-var TASTI_CON_SLOT = /* @__PURE__ */ new Set(["usage-session", "usage-weekly", "usage-model", "burn-rate", "today", "usage-meter", "sessions", "thecore"]);
+var TASTI_CON_SLOT = /* @__PURE__ */ new Set(["usage-session", "usage-weekly", "usage-model", "burn-rate", "today", "usage-meter", "sessions", "thecore", "nexus"]);
 var SLOT_VALIDI = /* @__PURE__ */ new Set(["approve-deny", "approve-always", "approve-allow"]);
 function slotDi(kind, settings) {
   const s = settings?.slot;
@@ -49391,6 +49777,10 @@ function viewFor(kind, env) {
       const v = vistaTheCore({ settings, tc: state2.thecore, conf: confTheCore(state2.globalSettings) });
       return img(thecoreKey(v));
     }
+    case "nexus": {
+      const v = vistaNexus({ settings, nx: state2.nexus, conf: confNexus(state2.globalSettings) });
+      return img(thecoreKey(v));
+    }
     case "luce": {
       const id = settings.dispositivo;
       if (settings.fonte !== "tuya") {
@@ -49566,6 +49956,8 @@ var state = {
   // (src/posta.js); thecore: { dati, at, okAt, err } (src/thecore.js).
   posta: /* @__PURE__ */ new Map(),
   thecore: null,
+  // nexus: { dati, at, okAt, err } (src/nexus.js).
+  nexus: null,
   // Le luci di Smart Life (src/luci.js): l'elenco dell'account, cosa sa fare ognuna, e
   // per ognuna { stato:{acceso,pct}, at, err, errTipo }. errTipo/err in cima: un errore
   // che riguarda tutte (le chiavi).
@@ -50710,6 +51102,16 @@ function onKeyDown(context, kind) {
       if (!url) return showAlert(context);
       return act(context, platform.openUrl(url));
     }
+    case "nexus": {
+      const m = METRICHE_NEXUS[metricaNexusDi(views.get(context)?.settings)];
+      const url = paginaNexus(confNexus(state.globalSettings).app, m.pagina);
+      if (!url) {
+        pollNexus(true);
+        return showAlert(context);
+      }
+      setTimeout(() => pollNexus(true), 6e4);
+      return act(context, platform.openUrl(url));
+    }
     case "launch":
       return act(context, platform.launchDesktop());
     case "quick-chat": {
@@ -50835,8 +51237,8 @@ function iniziaPressioneLunga(context, req) {
   annullaPressione(context);
   const timer = setTimeout(() => {
     pressioni.delete(context);
-    const ora3 = corrente();
-    if (!ora3 || ora3.id !== req.id) return showAlert(context);
+    const ora4 = corrente();
+    if (!ora4 || ora4.id !== req.id) return showAlert(context);
     rispondi(req.id, decisionBody("allow", req), "allow (pressione lunga)");
   }, LUNGO_MS);
   pressioni.set(context, { timer, reqId: req.id });
@@ -51044,6 +51446,43 @@ async function pollTheCore(forza = false) {
     thecoreInCorso = false;
   }
   renderAll(["thecore"]);
+}
+var nexusInCorso = false;
+var nexusFirma = "";
+async function pollNexus(forza = false) {
+  if (!forza && ![...views.values()].some((v) => v.kind === "nexus")) return;
+  const conf = confNexus(state.globalSettings);
+  if (!conf.completa) {
+    if (state.nexus) {
+      state.nexus = null;
+      nexusFirma = "";
+      renderAll(["nexus"]);
+    }
+    return;
+  }
+  const firma2 = conf.url + "|" + impronta(conf.chiave);
+  if (firma2 !== nexusFirma) {
+    nexusFirma = firma2;
+    state.nexus = null;
+    forza = true;
+  }
+  const nx = state.nexus;
+  if (!forza && nx && Date.now() - nx.at < (nx.err ? RITARDO_ERRORE_NEXUS_MS : INTERVALLO_NEXUS_MS)) return;
+  if (nexusInCorso) return;
+  nexusInCorso = true;
+  try {
+    const dati = await leggiNexus(conf);
+    const t = Date.now();
+    state.nexus = { dati, at: t, okAt: t, err: null };
+  } catch (e) {
+    const tipo = e?.tipo ?? "rete";
+    if (state.nexus?.err !== tipo) log(`nexus: lettura non riuscita: ${tipo} ${String(e?.message ?? "")}`);
+    const tieni = tipo !== "chiave" && state.nexus?.dati ? state.nexus : null;
+    state.nexus = { dati: tieni?.dati ?? null, at: Date.now(), okAt: tieni?.okAt ?? null, err: tipo };
+  } finally {
+    nexusInCorso = false;
+  }
+  renderAll(["nexus"]);
 }
 var tuya = null;
 var tuyaFirma = "";
@@ -51442,6 +51881,7 @@ if (process.argv.includes("--selftest")) {
       if (GAUGE_WINDOW[kindOf(action)]) setTimeout(() => pollSonda(), 1500);
       if (kindOf(action) === "posta") pollPosta();
       if (kindOf(action) === "thecore") pollTheCore();
+      if (kindOf(action) === "nexus") pollNexus();
       if (kindOf(action) === "luce") setTimeout(() => pollLuci(), 300);
     } else if (event === "willDisappear") {
       const wasApproveKey = faDaApprovazione(views.get(context));
@@ -51475,11 +51915,12 @@ if (process.argv.includes("--selftest")) {
       ensureHookServer();
       programmaRelay(200);
       renderApproveAll();
-      renderAll(["posta", "thecore", "luce"]);
+      renderAll(["posta", "thecore", "nexus", "luce"]);
       if (clientTuya()) pollLuci({ elenco: !state.luci.elencoAt });
       avviaAlexa();
       pollPosta();
       pollTheCore();
+      pollNexus();
     } else if (event === "sendToPlugin" && action) {
       if (msg.payload?.cmd === "getModels") {
         send({ event: "sendToPropertyInspector", context, payload: { models: (state.usage?.models ?? []).map((m) => m.name) } });
@@ -51521,6 +51962,11 @@ if (process.argv.includes("--selftest")) {
           thecore: statoTheCore({ tc: state.thecore, conf: confTheCore(state.globalSettings) })
         } });
       }
+      if (msg.payload?.cmd === "getNexus") {
+        send({ event: "sendToPropertyInspector", context, payload: {
+          nexus: { stato: statoNexus({ nx: state.nexus, conf: confNexus(state.globalSettings) }), ...nomiNexus(state.nexus) }
+        } });
+      }
       if (msg.payload?.cmd === "getRelay") {
         const { ok, err, sessioni } = state.relay;
         send({ event: "sendToPropertyInspector", context, payload: { relay: { ok, err, sessioni } } });
@@ -51551,6 +51997,7 @@ if (process.argv.includes("--selftest")) {
   setInterval(pollUsageMeter, 6e4);
   setInterval(pollPosta, 15e3);
   setInterval(pollTheCore, 3e4);
+  setInterval(pollNexus, 3e4);
   setInterval(pollLuci, 15e3);
   setInterval(() => {
     animPhase = (animPhase + 1) % 3;

@@ -251,15 +251,17 @@ I tre tasti di approvazione cambiano faccia secondo cosa c'è in attesa.
 - Una pressione troppo vicina a un cambio (richiesta nuova, pagina girata) fa
   lampeggiare il tasto e non conta: premi di nuovo.
 
-## La terza pagina: posta e TheCore
+## La terza pagina: posta, TheCore e Nexus
 
-Due tasti nuovi, pensati per una pagina tutta loro accanto ai due di Discord.
+Tre tasti, pensati per una pagina tutta loro accanto ai due di Discord.
 
 - **Posta (Gmail)**: quante mail ci sono da leggere in una casella Gmail o Google
   Workspace. Premuto apre Gmail su quell'account nel browser (per indirizzo, con
   `?authuser=`, quindi non importa in che ordine sono collegati gli account).
 - **TheCore**: un numero del gestionale, scelto dal menu del tasto. Premuto apre la
   pagina di TheCore da cui quel numero viene.
+- **Nexus**: un numero delle finanze di casa (patrimonio, liquidità, spese,
+  investimenti, i chilometri dell'auto). Premuto apre la pagina di Nexus da cui viene.
 
 Sono disegnati nello stile di Discord, per stare accanto ai suoi tasti: fondo grigio
 di Discord, e per ogni metrica un'icona bianca su una tessera colorata. Il colore
@@ -270,7 +272,7 @@ posta porta il numero nel **badge rosso delle menzioni**, e senza mail da legger
 badge non c'è. Un numero che non si è potuto aggiornare resta, con scritto «offline ·
 10:32» (sulla busta il badge diventa grigio): non diventa mai uno zero. Si legge solo
 mentre la pagina è aperta: la posta ogni due minuti (e 45 secondi dopo che l'hai
-aperta), TheCore ogni cinque.
+aperta), TheCore e Nexus ogni cinque.
 
 ### Il tasto Posta
 
@@ -329,6 +331,51 @@ repository `thecore-v2`, da portare su staging e poi in produzione).
 
 Se TheCore rifiuta la chiave (rigenerata, revocata, o il ruolo è cambiato) il tasto
 scrive «chiave rifiutata» e smette di mostrare i numeri.
+
+### Il tasto Nexus
+
+I numeri di Nexus, il gestionale di casa: finanze, investimenti, veicoli. Si disegna
+come i tasti TheCore, con quattro tessere sue: **azzurro** finanze, **viola**
+investimenti, **arancio** veicoli, **grigio** ciò che c'è da guardare oggi.
+
+1. In Nexus: **Altro → Stream Deck → Genera la chiave**. La scheda mostra tre cose,
+   ognuna col suo «Copia»: l'indirizzo, la chiave e l'indirizzo di Nexus. La chiave si
+   vede una volta sola.
+2. Trascina **Nexus** sulla pagina e, in fondo alle sue impostazioni, nella sezione
+   **Nexus — condivise**, incolla le tre cose. Valgono per tutti i tasti Nexus. Sotto
+   deve comparire «Collegato · N conti, N veicoli».
+3. Per ogni tasto scegli **Che numero mostra**. Per «Saldo di un conto» e per i numeri
+   dei veicoli scegli anche **quale conto** e **quale veicolo** (l'elenco arriva dopo la
+   prima lettura; senza una scelta è il primo).
+
+| Gruppo | Metrica | Il tasto dice | Premuto apre |
+|---|---|---|---|
+| Finanze | Patrimonio | il totale di Home, e sotto la liquidità | Home |
+| Finanze | Liquidità | i conti in euro che non sono investimenti né debiti, e quanto è uscito oggi | Conti |
+| Finanze | Uscite del mese | senza anticipi e senza giroconti; sotto, le uscite di oggi (o il mese scorso) | Flussi |
+| Finanze | Entrate del mese | e il mese scorso | Flussi |
+| Finanze | Risparmio del mese | entrate meno uscite, e quanto è andato negli investimenti | Flussi |
+| Finanze | Uscite di oggi | e il totale del mese | Movimenti |
+| Finanze | Movimenti da classificare | ambra se ce n'è | Movimenti senza categoria |
+| Finanze | Saldo di un conto | il conto scelto, nella sua valuta | Conti |
+| Investimenti | Controvalore | il totale della scheda Investiti, con la resa e il guadagno; «al versato» se manca un prezzo | Investiti |
+| Investimenti | Guadagno | controvalore meno versato, e la resa; «--» se manca il prezzo | Investiti |
+| Investimenti | Versato | e quanto questo mese | Investiti |
+| Investimenti | Quote possedute | ambra se qualcuna è ancora una stima (l'estratto conto la rende esatta) | Investiti |
+| Investimenti | Prezzo del titolo | l'ultima chiusura e il suo giorno, se il titolo è uno solo | Investiti |
+| Veicoli | Chilometri | il contachilometri, e i chilometri del mese | Veicoli |
+| Veicoli | Consumo medio | litri per 100 km; «--» finché non ci sono due pieni | Veicoli |
+| Veicoli | Spesa del mese | carburante e manutenzione del mese | Veicoli |
+| Veicoli | Prossima scadenza | fra quanti giorni (o chilometri) e quale; ambra se è vicina, rosso se è scaduta | Veicoli |
+| Oggi | Cose da guardare oggi | quelle di «Oggi» in Home; «ok» se non c'è niente, rosso se c'è un errore | Home |
+| Oggi | Banche | «ok» e l'ora dell'ultima lettura, o quante cose chiedono attenzione | Banche |
+| Oggi | Movimenti senza descrizione | quelli che aspettano l'estratto conto | Banche |
+
+La chiave legge **solo questo riassunto**: totali, saldi, conteggi, i nomi dei conti e
+dei veicoli. Mai un movimento, e non scrive niente. Se Nexus la rifiuta (rigenerata o
+revocata) il tasto scrive «chiave rifiutata» e smette di mostrare i numeri. Si legge
+ogni cinque minuti, solo con un tasto Nexus a schermo; premuto un tasto, si rilegge un
+minuto dopo.
 
 ### Una disposizione per lo Stream Deck MK.2 (15 tasti)
 
@@ -461,6 +508,6 @@ entro un minuto.
   tasti), `src/supabase.js` (lettura o scrittura, PROD o STAGING), la riga in basso
   in `rigaInBasso` di `src/view.js`.
 - Terza pagina: `src/imap.js` (il minimo di IMAP, senza dipendenze), `src/posta.js`
-  e `src/thecore.js` (cosa disegnano i tasti, puri), il disegno in `postaKey` e
-  `thecoreKey` di `src/keyart.js`.
+  `src/thecore.js` e `src/nexus.js` (cosa disegnano i tasti, puri), il disegno in
+  `postaKey` e `thecoreKey` di `src/keyart.js` (il tasto Nexus usa la seconda).
 - `npm test` esegue tutti i test, compresi quelli del relay e dell'hook.

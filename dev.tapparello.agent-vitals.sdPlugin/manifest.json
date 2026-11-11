@@ -1,7 +1,7 @@
 {
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "Name": "Agent Vitals",
-  "Version": "1.17.0.0",
+  "Version": "1.18.0.0",
   "Author": "Cristiano Tapparello",
   "Description": "Usage and cost gauges, live Claude Code session status, and one-press Allow / Always / Deny for permission prompts. Plus quick-launch keys for Claude Desktop and claude.ai.",
   "UUID": "dev.tapparello.agent-vitals",
@@ -415,6 +415,24 @@
       "States": [
         {
           "Image": "imgs/thecore",
+          "ShowTitle": false
+        }
+      ]
+    },
+    {
+      "UUID": "dev.tapparello.agent-vitals.nexus",
+      "Name": "Nexus",
+      "Tooltip": "Un numero di Nexus (patrimonio, liquidità, spese, investimenti, chilometri dell'auto), letto con la chiave personale dello Stream Deck. Premuto apre la pagina da cui viene.",
+      "Icon": "imgs/list/nexus",
+      "PropertyInspectorPath": "pi/pi.html",
+      "Controllers": [
+        "Keypad"
+      ],
+      "SupportedInMultiActions": false,
+      "UserTitleEnabled": false,
+      "States": [
+        {
+          "Image": "imgs/nexus",
           "ShowTitle": false
         }
       ]

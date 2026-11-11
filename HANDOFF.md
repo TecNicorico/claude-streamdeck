@@ -586,3 +586,43 @@ Guida utente: `DECK-REMOTO.md`, «La terza pagina». Per chi tocca il codice:
 - Tested with a fake `AlexaRemote` (`test/alexa.test.js`) and, for the login start,
   with the real bundled library (the proxy came up on 127.0.0.1). Not tested against
   Amazon: no account and no network to it from the build container.
+
+## The Nexus key (1.18.0, 11/11/2026)
+
+Guida utente: `DECK-REMOTO.md`, «Il tasto Nexus». Richiesta: «come abbiamo fatto per
+Decor… mettere anche i dati di questo gestionale: la mia liquidità, le mie spese, i miei
+investimenti, il controvalore… magari anche i chilometri della Punto».
+
+- `src/nexus.js` è il gemello di `src/thecore.js`: catalogo `METRICHE_NEXUS` (venti
+  metriche in quattro gruppi), `confNexus` (`nexusUrl`, `nexusKey`, `nexusApp` nelle
+  impostazioni globali), `leggiNexus`, `vistaNexus`, `statoNexus`. In `plugin.js`
+  `pollNexus` è `pollTheCore` con un altro stato (`state.nexus`): una lettura per tutti
+  i tasti, ogni cinque minuti, solo con un tasto Nexus a schermo.
+- **Il contratto** è il riassunto di `deck-metriche` di Nexus (repository `nexus`,
+  migration `0011`, `frontend/src/lib/deck/riassunto.ts`, `docs/STREAMDECK.md`):
+  `{versione: 1, at, finanze, investimenti, conti[], banche, veicoli[], oggi}`.
+  `RIASSUNTO` in `test/nexus.test.js` ha le stesse chiavi e gli stessi numeri del banco
+  di prova di là (`backend/scripts/deck.test.mjs`). Là i numeri li fanno le funzioni
+  dell'app: qui non si ricalcola niente, si sceglie cosa scrivere.
+- **`null` è «non si sa», non zero**: il guadagno senza un prezzo, il consumo senza due
+  pieni. Il tasto scrive «--» col perché; non `€ 0`.
+- **Un conto o un veicolo si sceglie per nome** (`settings.conto`, `settings.veicolo`;
+  il riassunto non porta id, apposta). Senza un nome è il primo; **un nome che non c'è
+  più non ripiega sul primo** — mostrerebbe il saldo di un altro conto sotto il titolo
+  di sempre — ma dice «"X" non c'è». Il pannello riceve i nomi con `getNexus`.
+- **Il disegno è `thecoreKey`**: stessa faccia, la tessera prende il colore da
+  `D.nexus` (Finanze, Investimenti, Veicoli, Oggi) quando il gruppo non è di TheCore.
+  Dieci icone nuove in `ICONE` (portafoglio, goccia, su, giu, etichetta, carta, grafico,
+  auto, pompa, calendario); `test/keyart.test.js` controlla che ogni glifo del catalogo
+  esista (uno che manca si disegnerebbe come «battito», senza un errore) e che ogni
+  gruppo abbia la sua tessera.
+- Una metrica nuova è un campo nel riassunto di Nexus (col suo test là), una voce in
+  `METRICHE_NEXUS` e una riga in `METRICHE_NEXUS_PI` del pannello: `test/nexus.test.js`
+  confronta pannello e codice, e le pagine che i tasti aprono con le rotte di Nexus.
+- Come per TheCore: una chiave rifiutata (401) non tiene i numeri di prima; un guasto
+  di rete sì, spenti, con «offline · hh:mm». La chiave di TheCore non apre Nexus e
+  viceversa: due impostazioni, due stati.
+- Il tasto è nel profilo incluso (pagina dei collegamenti, 1,2) e nell'anteprima
+  (`docs/keys.svg`). Provato col bundle vero contro uno Stream Deck finto e un Nexus
+  finto (`fetch` sostituita): senza impostazioni, con la chiave buona, col pannello,
+  con la chiave revocata. Non contro il Nexus vero, e non su un deck fisico.

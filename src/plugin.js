@@ -23,6 +23,7 @@ import { randomBytes, createHash } from "node:crypto";
 import { contaNonLette } from "./imap.js";
 import { caselleDaLeggere, prossimaLettura, normEmail, modoDi, passwordDi, chiaveLettura, urlGmail, statoPosta } from "./posta.js";
 import { confTheCore, leggiTheCore, metricaDi, METRICHE, urlPagina, statoTheCore, INTERVALLO_THECORE_MS, RITARDO_ERRORE_THECORE_MS } from "./thecore.js";
+import { confNexus, leggiNexus, metricaNexusDi, METRICHE_NEXUS, paginaNexus, statoNexus, nomiNexus, INTERVALLO_NEXUS_MS, RITARDO_ERRORE_NEXUS_MS } from "./nexus.js";
 import {
   decisionBody, answerBody, pressDecision, isQuestion, richiestaCorrente, sessioniInAttesa, prossimaScelta,
   enqueue, approvableDepth, pendingBySession, resolve, expiredIds, staleIds, seedBaselines, hookFragment,
@@ -129,6 +130,8 @@ const state = {
   // (src/posta.js); thecore: { dati, at, okAt, err } (src/thecore.js).
   posta: new Map(),
   thecore: null,
+  // nexus: { dati, at, okAt, err } (src/nexus.js).
+  nexus: null,
   // Le luci di Smart Life (src/luci.js): l'elenco dell'account, cosa sa fare ognuna, e
   // per ognuna { stato:{acceso,pct}, at, err, errTipo }. errTipo/err in cima: un errore
   // che riguarda tutte (le chiavi).
@@ -1436,6 +1439,15 @@ function onKeyDown(context, kind) {
       if (!url) return showAlert(context);
       return act(context, platform.openUrl(url));
     }
+    case "nexus": {
+      const m = METRICHE_NEXUS[metricaNexusDi(views.get(context)?.settings)];
+      const url = paginaNexus(confNexus(state.globalSettings).app, m.pagina);
+      // Senza l'indirizzo di Nexus la pressione rilegge: è comunque ciò che si voleva vedere.
+      if (!url) { pollNexus(true); return showAlert(context); }
+      // Tornando dalla pagina i numeri possono essere cambiati: fra un minuto si rilegge.
+      setTimeout(() => pollNexus(true), 60_000);
+      return act(context, platform.openUrl(url));
+    }
     case "launch": return act(context, platform.launchDesktop());
     case "quick-chat": {
       const s = views.get(context)?.settings ?? {};
@@ -1807,6 +1819,40 @@ async function pollTheCore(forza = false) {
   renderAll(["thecore"]);
 }
 
+// Una lettura sola per tutti i tasti Nexus, come per TheCore.
+let nexusInCorso = false;
+let nexusFirma = "";
+async function pollNexus(forza = false) {
+  if (!forza && ![...views.values()].some((v) => v.kind === "nexus")) return;
+  const conf = confNexus(state.globalSettings);
+  if (!conf.completa) {
+    if (state.nexus) { state.nexus = null; nexusFirma = ""; renderAll(["nexus"]); }
+    return;
+  }
+  // Indirizzo o chiave cambiati: i numeri di prima non sono di questa configurazione.
+  const firma = conf.url + "|" + impronta(conf.chiave);
+  if (firma !== nexusFirma) { nexusFirma = firma; state.nexus = null; forza = true; }
+  const nx = state.nexus;
+  if (!forza && nx && Date.now() - nx.at < (nx.err ? RITARDO_ERRORE_NEXUS_MS : INTERVALLO_NEXUS_MS)) return;
+  if (nexusInCorso) return;
+  nexusInCorso = true;
+  try {
+    const dati = await leggiNexus(conf);
+    const t = Date.now();
+    state.nexus = { dati, at: t, okAt: t, err: null };
+  } catch (e) {
+    const tipo = e?.tipo ?? "rete";
+    if (state.nexus?.err !== tipo) log(`nexus: lettura non riuscita: ${tipo} ${String(e?.message ?? "")}`);
+    // Una chiave rifiutata non tiene i numeri di prima: una chiave revocata deve
+    // smettere di mostrare i conti, non mostrarli fermi.
+    const tieni = tipo !== "chiave" && state.nexus?.dati ? state.nexus : null;
+    state.nexus = { dati: tieni?.dati ?? null, at: Date.now(), okAt: tieni?.okAt ?? null, err: tipo };
+  } finally {
+    nexusInCorso = false;
+  }
+  renderAll(["nexus"]);
+}
+
 // ---------- le luci di Smart Life (src/luci.js) ----------
 // Lo stato si legge solo con un tasto Luce a schermo, una volta al minuto, e subito
 // dopo una pressione; l'elenco ogni dieci minuti. Il cloud di Tuya conta le chiamate
@@ -2159,6 +2205,7 @@ if (process.argv.includes("--selftest")) {
       if (GAUGE_WINDOW[kindOf(action)]) setTimeout(() => pollSonda(), 1500);
       if (kindOf(action) === "posta") pollPosta();
       if (kindOf(action) === "thecore") pollTheCore();
+      if (kindOf(action) === "nexus") pollNexus();
       if (kindOf(action) === "luce") setTimeout(() => pollLuci(), 300);
     } else if (event === "willDisappear") {
       const wasApproveKey = faDaApprovazione(views.get(context));
@@ -2198,11 +2245,12 @@ if (process.argv.includes("--selftest")) {
       ensureHookServer();
       programmaRelay(200);
       renderApproveAll();
-      renderAll(["posta", "thecore", "luce"]);
+      renderAll(["posta", "thecore", "nexus", "luce"]);
       if (clientTuya()) pollLuci({ elenco: !state.luci.elencoAt });
       avviaAlexa();
       pollPosta();
       pollTheCore();
+      pollNexus();
     } else if (event === "sendToPlugin" && action) {
       if (msg.payload?.cmd === "getModels") {
         send({ event: "sendToPropertyInspector", context, payload: { models: (state.usage?.models ?? []).map((m) => m.name) } });
@@ -2241,6 +2289,11 @@ if (process.argv.includes("--selftest")) {
           thecore: statoTheCore({ tc: state.thecore, conf: confTheCore(state.globalSettings) }),
         } });
       }
+      if (msg.payload?.cmd === "getNexus") {
+        send({ event: "sendToPropertyInspector", context, payload: {
+          nexus: { stato: statoNexus({ nx: state.nexus, conf: confNexus(state.globalSettings) }), ...nomiNexus(state.nexus) },
+        } });
+      }
       if (msg.payload?.cmd === "getRelay") {
         const { ok, err, sessioni } = state.relay;
         send({ event: "sendToPropertyInspector", context, payload: { relay: { ok, err, sessioni } } });
@@ -2265,9 +2318,10 @@ if (process.argv.includes("--selftest")) {
   pollBurn();
   setInterval(pollBurn, 60_000);
   setInterval(pollUsageMeter, 60_000);
-  // Due giri leggeri: rileggono solo ciò che è scaduto (src/posta.js, src/thecore.js).
+  // Tre giri leggeri: rileggono solo ciò che è scaduto (src/posta.js, src/thecore.js, src/nexus.js).
   setInterval(pollPosta, 15_000);
   setInterval(pollTheCore, 30_000);
+  setInterval(pollNexus, 30_000);
   setInterval(pollLuci, 15_000);
   // Animation ticker: busy-session dots + red pulse on gauges at 90%+
   setInterval(() => {

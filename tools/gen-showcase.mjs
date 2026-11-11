@@ -82,6 +82,16 @@ const ROWS = [
     ["outbox", K.thecoreKey({ glifo: "battito", gruppo: "Operativo", titolo: "Outbox", valore: "3", sub: "2 falliti · 1 fermo", tono: "guasto" })],
     ["fornitori", K.thecoreKey({ glifo: "camion", gruppo: "Operativo", titolo: "Fornitori", valore: "0", sub: "con un problema" })],
   ]],
+  ["Nexus — le finanze di casa: liquidità, spese, investimenti, i chilometri dell'auto", [
+    ["patrimonio", K.thecoreKey({ glifo: "portafoglio", gruppo: "Finanze", titolo: "Patrimonio", valore: "€ 12,5k", sub: "liquidi € 3.722" })],
+    ["uscite", K.thecoreKey({ glifo: "giu", gruppo: "Finanze", titolo: "Uscite", valore: "€ 868", sub: "oggi € 25" })],
+    ["da classificare", K.thecoreKey({ glifo: "etichetta", gruppo: "Finanze", titolo: "Da classif.", valore: "3", sub: "da classificare", tono: "attenzione" })],
+    ["investiti", K.thecoreKey({ glifo: "grafico", gruppo: "Investimenti", titolo: "Investiti", valore: "€ 8.758", sub: "▲ 8,1% · € 658" })],
+    ["quote", K.thecoreKey({ glifo: "layers", gruppo: "Investimenti", titolo: "Quote", valore: "35,025", sub: "a € 139,82" })],
+    ["chilometri", K.thecoreKey({ glifo: "auto", gruppo: "Veicoli", titolo: "Punto", valore: "187.900", sub: "+500 km nel mese" })],
+    ["scadenza", K.thecoreKey({ glifo: "calendario", gruppo: "Veicoli", titolo: "Scadenza", valore: "14 g", sub: "Revisione", tono: "attenzione" })],
+    ["banche", K.thecoreKey({ glifo: "scuola", gruppo: "Oggi", titolo: "Banche", valore: "ok", sub: "lette 08:15" })],
+  ]],
   ["Le luci di Smart Life — accesa la tessera è gialla e la barra dice quanto", [
     ["accende e spegne", K.luceKey({ titolo: "Studio", breve: "Spegni", acceso: true, pct: 60, valore: "60%", sub: "tocca per spegnere" })],
     ["spenta", K.luceKey({ titolo: "Studio", breve: "Accendi", acceso: false, pct: null, valore: "Spenta", sub: "tocca per accendere" })],

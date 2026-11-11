@@ -16,6 +16,7 @@ import {
 } from "./keyart.js";
 import { vistaPosta, facciaPosta, passwordDi, chiaveLettura, normEmail, modoDi } from "./posta.js";
 import { vistaTheCore, confTheCore } from "./thecore.js";
+import { vistaNexus, confNexus } from "./nexus.js";
 import { vistaLuce, confLuci } from "./luci.js";
 import { budgetPct, gaugeSource, familyOf } from "./usage.js";
 import { cinqueOre, finestraValida, daEndpoint, SETTE_GIORNI_MS } from "./consumi.js";
@@ -157,9 +158,9 @@ export function sessionEta(state, now) {
 // lo dice la sua impostazione `slot`. Senza richieste torna a mostrare ciò che mostrava.
 // Solo tasti che mostrano e basta: uno che apre una finestra o un'app, cambiando faccia
 // sotto il dito, farebbe qualcosa che la persona non ha scelto.
-// I tasti TheCore della terza pagina ci sono anche loro: mentre si guarda quella
-// pagina, una richiesta di Claude deve poter trovare una riga su cui rispondere.
-export const TASTI_CON_SLOT = new Set(["usage-session", "usage-weekly", "usage-model", "burn-rate", "today", "usage-meter", "sessions", "thecore"]);
+// I tasti TheCore e Nexus della terza pagina ci sono anche loro: mentre si guarda
+// quella pagina, una richiesta di Claude deve poter trovare una riga su cui rispondere.
+export const TASTI_CON_SLOT = new Set(["usage-session", "usage-weekly", "usage-model", "burn-rate", "today", "usage-meter", "sessions", "thecore", "nexus"]);
 export const SLOT_VALIDI = new Set(["approve-deny", "approve-always", "approve-allow"]);
 export function slotDi(kind, settings) {
   const s = settings?.slot;
@@ -380,6 +381,11 @@ export function viewFor(kind, env) {
     }
     case "thecore": {
       const v = vistaTheCore({ settings, tc: state.thecore, conf: confTheCore(state.globalSettings) });
+      return img(thecoreKey(v));
+    }
+    case "nexus": {
+      // Stessa faccia dei tasti TheCore: la tessera del gruppo, il numero, la riga sotto.
+      const v = vistaNexus({ settings, nx: state.nexus, conf: confNexus(state.globalSettings) });
       return img(thecoreKey(v));
     }
     case "luce": {

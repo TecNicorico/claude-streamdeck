@@ -125,6 +125,12 @@ const FIELDS = {
     { key: "metrica", type: "metrica", label: "Che numero mostra" },
     SLOT_FIELD,
   ],
+  "dev.tapparello.agent-vitals.nexus": [
+    { key: "metrica", type: "metrica", nexus: true, label: "Che numero mostra" },
+    { key: "conto", type: "nexusnome", elenco: "conti", label: "Quale conto (per «Saldo di un conto»)" },
+    { key: "veicolo", type: "nexusnome", elenco: "veicoli", label: "Quale veicolo (per i numeri dei veicoli)" },
+    SLOT_FIELD,
+  ],
 };
 // Lo stesso elenco di METRICHE in src/thecore.js, nello stesso ordine: il pannello
 // non importa moduli, e test/thecore.test.js confronta i due.
@@ -147,11 +153,36 @@ const METRICHE_PI = [
   ["plao", "Operativo", "PLAO da controllare"],
   ["fornitori", "Operativo", "Ordini fornitori con un problema"],
 ];
+// Lo stesso elenco di METRICHE_NEXUS in src/nexus.js, nello stesso ordine:
+// test/nexus.test.js confronta i due.
+const METRICHE_NEXUS_PI = [
+  ["patrimonio", "Finanze", "Patrimonio"],
+  ["liquidita", "Finanze", "Liquidità"],
+  ["uscite_mese", "Finanze", "Uscite del mese"],
+  ["entrate_mese", "Finanze", "Entrate del mese"],
+  ["netto_mese", "Finanze", "Risparmio del mese (entrate − uscite)"],
+  ["uscite_oggi", "Finanze", "Uscite di oggi"],
+  ["da_classificare", "Finanze", "Movimenti da classificare"],
+  ["saldo_conto", "Finanze", "Saldo di un conto"],
+  ["investimenti", "Investimenti", "Controvalore degli investimenti"],
+  ["guadagno", "Investimenti", "Guadagno degli investimenti"],
+  ["versato", "Investimenti", "Versato negli investimenti"],
+  ["quote", "Investimenti", "Quote possedute"],
+  ["prezzo", "Investimenti", "Prezzo del titolo (ultima chiusura)"],
+  ["km", "Veicoli", "Chilometri del veicolo"],
+  ["consumo", "Veicoli", "Consumo medio del veicolo"],
+  ["spesa_veicolo", "Veicoli", "Spesa del mese per il veicolo"],
+  ["scadenza", "Veicoli", "Prossima scadenza del veicolo"],
+  ["oggi", "Oggi", "Cose da guardare oggi"],
+  ["banche", "Oggi", "Banche: la lettura e ciò che chiede attenzione"],
+  ["senza_descrizione", "Oggi", "Movimenti senza descrizione (serve l'estratto conto)"],
+];
 const normEmail = (e) => { const t = String(e ?? "").trim().toLowerCase(); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t) ? t : ""; };
 function save() { ws.send(JSON.stringify({ event: "setSettings", context: piUuid, payload: settings })); }
 function build() {
   const form = document.getElementById("form");
   form.innerHTML = "";
+  nexusRiempi = [];
   for (const f of FIELDS[action] ?? []) {
     const div = document.createElement("div");
     div.className = "item";
@@ -332,16 +363,38 @@ function build() {
       l.textContent = f.label;
       const sel = document.createElement("select");
       const gruppi = new Map();
-      for (const [id, gruppo, nome] of METRICHE_PI) {
+      const elenco = f.nexus ? METRICHE_NEXUS_PI : METRICHE_PI;
+      for (const [id, gruppo, nome] of elenco) {
         if (!gruppi.has(gruppo)) { const g = document.createElement("optgroup"); g.label = gruppo; gruppi.set(gruppo, g); sel.append(g); }
         const o = document.createElement("option"); o.value = id; o.textContent = nome;
         gruppi.get(gruppo).append(o);
       }
       const RINOMINATE = { avvisi: "notifiche" }; // come METRICHE_RINOMINATE in src/thecore.js
-      sel.value = RINOMINATE[settings[f.key]] ?? settings[f.key] ?? METRICHE_PI[0][0];
-      if (sel.selectedIndex < 0) sel.value = METRICHE_PI[0][0];
+      sel.value = (f.nexus ? null : RINOMINATE[settings[f.key]]) ?? settings[f.key] ?? elenco[0][0];
+      if (sel.selectedIndex < 0) sel.value = elenco[0][0];
       sel.onchange = () => { settings[f.key] = sel.value; save(); };
       div.append(l, sel);
+    } else if (f.type === "nexusnome") {
+      // Un conto o un veicolo di Nexus, per nome: l'elenco arriva dal plugin dopo la
+      // prima lettura. Un nome già scelto resta in elenco anche se non è (ancora) arrivato.
+      const l = document.createElement("label");
+      l.textContent = f.label;
+      const sel = document.createElement("select");
+      const riempi = () => {
+        const cur = settings[f.key] ?? "";
+        const nomi = nexusInfo?.[f.elenco] ?? [];
+        sel.innerHTML = "";
+        const primo = document.createElement("option");
+        primo.value = ""; primo.textContent = nomi.length ? `Il primo (${nomi[0]})` : "Il primo";
+        sel.append(primo);
+        for (const n of nomi) { const o = document.createElement("option"); o.value = n; o.textContent = n; sel.append(o); }
+        if (cur && !nomi.includes(cur)) { const o = document.createElement("option"); o.value = cur; o.textContent = nomi.length ? cur + " (non c'è più)" : cur; sel.append(o); }
+        sel.value = cur;
+      };
+      riempi();
+      sel.onchange = () => { if (sel.value) settings[f.key] = sel.value; else delete settings[f.key]; save(); };
+      div.append(l, sel);
+      nexusRiempi.push(riempi);
     } else if (f.type === "checkbox") {
       const l = document.createElement("label");
       l.className = "chk";
@@ -381,6 +434,7 @@ function build() {
   if (action === "dev.tapparello.agent-vitals.usage-meter") buildRates();
   if (RELAY_ACTIONS.includes(action)) buildRelay();
   if (action === THECORE_ACTION) buildTheCore();
+  if (action === NEXUS_ACTION) buildNexus();
   if (action === LUCE_ACTION) {
     buildLuci();
     const sf = [...document.querySelectorAll("#form select")][0];
@@ -398,8 +452,9 @@ function build() {
 }
 const POSTA_ACTION = "dev.tapparello.agent-vitals.posta";
 const THECORE_ACTION = "dev.tapparello.agent-vitals.thecore";
+const NEXUS_ACTION = "dev.tapparello.agent-vitals.nexus";
 const LUCE_ACTION = "dev.tapparello.agent-vitals.luce";
-const GS_ACTIONS = ["dev.tapparello.agent-vitals.usage-meter", "dev.tapparello.agent-vitals.usage-model", POSTA_ACTION, THECORE_ACTION, LUCE_ACTION];
+const GS_ACTIONS = ["dev.tapparello.agent-vitals.usage-meter", "dev.tapparello.agent-vitals.usage-model", POSTA_ACTION, THECORE_ACTION, NEXUS_ACTION, LUCE_ACTION];
 // Le luci: le chiavi del progetto Tuya, condivise da tutti i tasti Luce.
 let luciInfo = null, luciRiempi = null;
 const fonteLuce = () => (settings.fonte === "tuya" ? "tuya" : "alexa");
@@ -530,6 +585,45 @@ function buildTheCore() {
   cap.textContent = "Le tre cose si copiano da TheCore: Impostazioni → Preferenze → Stream Deck → «Genera la chiave». La chiave apre i numeri di tutta la stagione: trattala come una password.";
   box.append(cap);
 }
+// Nexus: come TheCore, tre impostazioni condivise da tutti i tasti Nexus. La chiave si
+// genera in Nexus (Altro → Stream Deck) e si vede una volta sola.
+function askNexus() { if (ws && action === NEXUS_ACTION) ws.send(JSON.stringify({ event: "sendToPlugin", action, context: piUuid, payload: { cmd: "getNexus" } })); }
+const NEXUS_FIELDS = [
+  { key: "nexusUrl", label: "Indirizzo (https://…/functions/v1/deck-metriche)", type: "text" },
+  { key: "nexusKey", label: "Chiave (nxd_…)", type: "password" },
+  { key: "nexusApp", label: "Indirizzo di Nexus (dove la pressione apre le pagine)", type: "text" },
+];
+// nexusInfo: { stato, conti: [nomi], veicoli: [nomi] }, dal plugin.
+let nexusInfo = null, nexusRiempi = [];
+function buildNexus() {
+  let box = document.getElementById("nexus");
+  if (!box) { box = document.createElement("div"); box.id = "nexus"; document.getElementById("form").append(box); }
+  box.innerHTML = "";
+  const h = document.createElement("div"); h.className = "rateshead"; h.textContent = "Nexus — condivise"; box.append(h);
+  for (const f of NEXUS_FIELDS) {
+    const div = document.createElement("div"); div.className = "item";
+    const l = document.createElement("label"); l.textContent = f.label;
+    const i = document.createElement("input"); i.type = f.type; i.autocomplete = "off"; i.spellcheck = false;
+    i.value = gs[f.key] ?? "";
+    i.onchange = () => {
+      if (!gsReady) return;
+      const v = i.value.trim();
+      if (v) gs[f.key] = v; else delete gs[f.key];
+      ws.send(JSON.stringify({ event: "setGlobalSettings", context: piUuid, payload: gs }));
+      // La lettura parte al cambio delle impostazioni: fra poco ci sono stato e nomi.
+      setTimeout(askNexus, 3000);
+      setTimeout(askNexus, 8000);
+    };
+    div.append(l, i);
+    box.append(div);
+  }
+  const st = document.createElement("div"); st.className = "cap"; st.id = "nexusState";
+  st.textContent = nexusInfo?.stato ?? "";
+  box.append(st);
+  const cap = document.createElement("div"); cap.className = "cap";
+  cap.textContent = "Le tre cose si copiano da Nexus: Altro → Stream Deck → «Genera la chiave». La chiave legge solo un riassunto (totali, saldi, chilometri), mai i movimenti; trattala comunque come una password.";
+  box.append(cap);
+}
 // Relay e Supabase: impostazioni condivise da tutti i tasti (global settings), come le
 // tariffe del tasto Usage. La chiave è quella del DECK, mai quella del cloud.
 const RELAY_ACTIONS = ["approve-allow", "approve-always", "approve-deny", "approver-status", "approver-waiting", "usage-session", "usage-weekly"].map((k) => "dev.tapparello.agent-vitals." + k);
@@ -616,6 +710,7 @@ function connectElgatoStreamDeckSocket(port, uuid, evt, info, actionInfo) {
     }
     if (RELAY_ACTIONS.includes(action)) askRelay();
     if (action === THECORE_ACTION) askTheCore();
+    if (action === NEXUS_ACTION) askNexus();
   };
   ws.onmessage = (e) => {
     let m;
@@ -631,6 +726,7 @@ function connectElgatoStreamDeckSocket(port, uuid, evt, info, actionInfo) {
       if (RELAY_ACTIONS.includes(action)) buildRelay();
       if (action === POSTA_ACTION) build();
       if (action === THECORE_ACTION) buildTheCore();
+      if (action === NEXUS_ACTION) buildNexus();
       if (action === LUCE_ACTION) buildLuci();
       return;
     }
@@ -652,6 +748,12 @@ function connectElgatoStreamDeckSocket(port, uuid, evt, info, actionInfo) {
       thecoreInfo = m.payload.thecore;
       const st = document.getElementById("thecoreState");
       if (st) st.textContent = thecoreInfo;
+    }
+    if (m.event === "sendToPropertyInspector" && m.payload?.nexus && typeof m.payload.nexus === "object") {
+      nexusInfo = m.payload.nexus;
+      const st = document.getElementById("nexusState");
+      if (st) st.textContent = nexusInfo.stato ?? "";
+      for (const riempi of nexusRiempi) riempi();
     }
     if (m.event === "sendToPropertyInspector" && m.payload?.relay) {
       relayInfo = m.payload.relay;

@@ -249,6 +249,45 @@ test("i tasti della terza pagina non escono dal riquadro, con i numeri più lung
   }
 });
 
+test("i tasti Nexus non escono dal riquadro, con i numeri e i nomi più lunghi, e ogni icona e ogni gruppo esistono", async () => {
+  const { thecoreKey, DISCORD } = await import("../src/keyart.js");
+  const { METRICHE_NEXUS, vistaNexus } = await import("../src/nexus.js");
+  const lungo = "Conto corrente cointestato lunghissimo";
+  const grande = {
+    versione: 1, at: "2026-11-11T18:00:00.000Z",
+    finanze: { patrimonio: -12_345_678.9, liquidita: 9_876_543.2, investimenti: 1_234_567, debiti: -9_876_543, usciteMese: 123_456.7, entrateMese: 987_654.3, nettoMese: -864_197.6,
+      investitoMese: 55_555, usciteMeseScorso: 99_999.9, entrateMeseScorso: 88_888.8, usciteOggi: 12_345.6, daClassificare: 12_345 },
+    investimenti: { valore: 9_876_543.21, versato: 8_765_432.1, guadagno: -1_111_111.11, resa: -123.4, quote: 123_456.789, stimate: 1_234, prezzo: 12_345.67, prezzoDel: "2026-12-31" },
+    conti: [{ nome: lungo, tipo: "investimento", valuta: "USD", saldo: -9_876_543.21 }],
+    banche: { collegate: 12, daGuardare: 1_234, senzaDescrizione: 12_345, ultimaLettura: "2026-11-11T17:59:00.000Z" },
+    veicoli: [{ nome: "Fiat Punto Sporting 1.8 16V HGT", km: 1_234_567, kmMese: 12_345, consumo: 123.4, spesaMese: 12_345.6,
+      scadenza: { titolo: "Revisione periodica ministeriale e tagliando", giorni: 12_345, km: 123_456, stato: "vicina" } }],
+    oggi: { cose: 1_234, errori: 1_234, attenzioni: 0 },
+  };
+  const conf = { completa: true };
+  const visti = new Set();
+  for (const [metrica, m] of Object.entries(METRICHE_NEXUS)) {
+    assert.ok(DISCORD.nexus[m.gruppo], `${metrica}: il gruppo ${m.gruppo} non ha una tessera`);
+    for (const nx of [{ dati: grande, at: 0, err: null }, { dati: grande, at: 0, okAt: 0, err: "rete" }, { dati: null, at: 0, err: "chiave" }, { dati: null, at: 0, err: "formato" }, null]) {
+      for (const settings of [{ metrica }, { metrica, conto: "Un conto che non c'è più da un pezzo", veicolo: "Un veicolo che non c'è più" }]) {
+        const v = vistaNexus({ settings, nx, conf });
+        const svg = thecoreKey(v);
+        assertInsideBox(svg, `nexus ${metrica} ${nx?.err ?? "ok"}`);
+        visti.add(svg);
+        // La tessera ha il colore del gruppo, non il grigio di ripiego (tranne «Oggi», che è grigio di suo).
+        assert.ok(decodeURIComponent(svg).includes(`fill="${DISCORD.nexus[m.gruppo]}"`), `${metrica}: tessera del gruppo`);
+      }
+    }
+    // L'icona esiste: una che non c'è si disegnerebbe come «battito», senza un errore.
+    if (m.glifo !== "battito") {
+      const conIcona = thecoreKey({ ...vistaNexus({ settings: { metrica }, nx: { dati: grande, at: 0, err: null }, conf }) });
+      const conBattito = thecoreKey({ ...vistaNexus({ settings: { metrica }, nx: { dati: grande, at: 0, err: null }, conf }), glifo: "battito" });
+      assert.notEqual(conIcona, conBattito, `${metrica}: l'icona «${m.glifo}» non esiste`);
+    }
+  }
+  assert.ok(visti.size > Object.keys(METRICHE_NEXUS).length, "le facce non sono tutte uguali");
+});
+
 // ---------- il linguaggio di Discord sulle pagine di Claude (09/11/2026) ----------
 const svgDi = (uri) => decodeURIComponent(uri.replace(/^data:image\/svg\+xml,/, ""));
 // La sagoma grande della riga in basso, letta dalla geometria e mai dal colore: è ciò
