@@ -144,10 +144,13 @@ export const METRICHE_NEXUS = {
   },
   prezzo: {
     gruppo: "Investimenti", nome: "Prezzo del titolo (ultima chiusura)", titolo: "Prezzo", glifo: "battito", pagina: "/finanze?scheda=investimenti",
-    vista: (d) => {
+    vista: (d, _s, adesso = new Date()) => {
       const i = d.investimenti;
       if (!eNumero(i.prezzo)) return { valore: "--", sub: "non c'è un prezzo solo" };
-      return { valore: `€ ${decimali(i.prezzo, 2)}`, sub: i.prezzoDel ? `chiusura ${giornoBreve(i.prezzoDel)}` : "ultima chiusura" };
+      // Nexus rilegge il prezzo durante la seduta: quello di oggi non è (ancora) una chiusura.
+      const oggi = `${adesso.getFullYear()}-${due(adesso.getMonth() + 1)}-${due(adesso.getDate())}`;
+      const sub = !i.prezzoDel ? "ultima chiusura" : i.prezzoDel === oggi ? "prezzo di oggi" : `chiusura ${giornoBreve(i.prezzoDel)}`;
+      return { valore: `€ ${decimali(i.prezzo, 2)}`, sub };
     },
   },
   // --------------------------------------------------------------- veicoli

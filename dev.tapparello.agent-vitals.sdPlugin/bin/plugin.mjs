@@ -48047,10 +48047,12 @@ var METRICHE_NEXUS = {
     titolo: "Prezzo",
     glifo: "battito",
     pagina: "/finanze?scheda=investimenti",
-    vista: (d) => {
+    vista: (d, _s, adesso = /* @__PURE__ */ new Date()) => {
       const i = d.investimenti;
       if (!eNumero(i.prezzo)) return { valore: "--", sub: "non c'\xE8 un prezzo solo" };
-      return { valore: `\u20AC ${decimali(i.prezzo, 2)}`, sub: i.prezzoDel ? `chiusura ${giornoBreve(i.prezzoDel)}` : "ultima chiusura" };
+      const oggi = `${adesso.getFullYear()}-${due(adesso.getMonth() + 1)}-${due(adesso.getDate())}`;
+      const sub = !i.prezzoDel ? "ultima chiusura" : i.prezzoDel === oggi ? "prezzo di oggi" : `chiusura ${giornoBreve(i.prezzoDel)}`;
+      return { valore: `\u20AC ${decimali(i.prezzo, 2)}`, sub };
     }
   },
   // --------------------------------------------------------------- veicoli

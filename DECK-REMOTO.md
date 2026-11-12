@@ -362,7 +362,7 @@ investimenti, **arancio** veicoli, **grigio** ciò che c'è da guardare oggi.
 | Investimenti | Guadagno | controvalore meno versato, e la resa; «--» se manca il prezzo | Investiti |
 | Investimenti | Versato | e quanto questo mese | Investiti |
 | Investimenti | Quote possedute | ambra se qualcuna è ancora una stima (l'estratto conto la rende esatta) | Investiti |
-| Investimenti | Prezzo del titolo | l'ultima chiusura e il suo giorno, se il titolo è uno solo | Investiti |
+| Investimenti | Prezzo del titolo | il prezzo di oggi (Nexus lo rilegge mentre la borsa è aperta) o l'ultima chiusura col suo giorno, se il titolo è uno solo | Investiti |
 | Veicoli | Chilometri | il contachilometri, e i chilometri del mese | Veicoli |
 | Veicoli | Consumo medio | litri per 100 km; «--» finché non ci sono due pieni | Veicoli |
 | Veicoli | Spesa del mese | carburante e manutenzione del mese | Veicoli |

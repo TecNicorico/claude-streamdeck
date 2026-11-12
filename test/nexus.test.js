@@ -112,6 +112,11 @@ test("gli investimenti: senza un prezzo è «non si sa», non un guadagno a zero
   assert.deepEqual(vista("quote"), { valore: "6,9", sub: "1 stimata", tono: "attenzione" });
   assert.deepEqual(vista("quote", con({ investimenti: { stimate: 0 } })), { valore: "6,9", sub: "a € 170,00" });
   assert.deepEqual(vista("prezzo"), { valore: "€ 170,00", sub: "chiusura 10/11" });
+  // Nexus rilegge il prezzo a borsa aperta: quello del giorno in corso non si chiama chiusura.
+  const prezzo = (adesso) => METRICHE_NEXUS.prezzo.vista(RIASSUNTO, {}, adesso).sub;
+  assert.equal(prezzo(new Date(2026, 10, 10, 11, 30)), "prezzo di oggi");
+  assert.equal(prezzo(new Date(2026, 10, 11, 0, 5)), "chiusura 10/11");
+  assert.equal(METRICHE_NEXUS.prezzo.vista(con({ investimenti: { prezzoDel: null } }), {}).sub, "ultima chiusura");
 });
 
 test("i veicoli: chilometri, consumo, spesa, la scadenza più urgente", () => {
